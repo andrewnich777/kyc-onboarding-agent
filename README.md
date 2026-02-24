@@ -104,7 +104,7 @@ Every finding is tagged with an evidence level:
 
 ### Setup
 ```bash
-cd fluency-research-agent
+cd kyc-onboarding-agent
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env and add your ANTHROPIC_API_KEY
