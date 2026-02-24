@@ -354,6 +354,38 @@ class KYCEvidenceGraph(BaseModel):
     unresolved_items: list[str] = Field(default_factory=list)
 
 
+class CounterArgument(BaseModel):
+    """Adversarial analysis against a disposition."""
+    evidence_id: str = Field(description="Evidence record being challenged")
+    disposition_challenged: str = Field(description="The disposition being argued against, e.g. FALSE_POSITIVE")
+    argument: str = Field(description="The strongest case against the disposition, citing evidence")
+    risk_if_wrong: str = Field(description="What happens if this disposition is incorrect")
+    recommended_mitigations: list[str] = Field(default_factory=list, description="Steps to reduce residual risk")
+
+
+class DecisionOption(BaseModel):
+    """One selectable path for the compliance officer."""
+    option_id: str = Field(description="A, B, C, D etc.")
+    label: str = Field(description="Short label: CLEAR, ESCALATE, REQUEST_DOCS, REJECT")
+    description: str = Field(description="One-line description of what this means")
+    consequences: list[str] = Field(description="Downstream regulatory/operational consequences")
+    onboarding_impact: str = Field(description="What happens to the client's onboarding")
+    timeline: str = Field(description="Expected time to resolution")
+
+
+class DecisionPoint(BaseModel):
+    """A decision the officer needs to make, with options."""
+    decision_id: str
+    title: str = Field(description="e.g. 'Sanctions Disposition: Alexander Petrov'")
+    context_summary: str = Field(description="Brief summary of the finding")
+    disposition: str = Field(description="System's recommended disposition")
+    confidence: float = Field(default=0.0)
+    counter_argument: CounterArgument
+    options: list[DecisionOption] = Field(default_factory=list)
+    officer_selection: Optional[str] = None
+    officer_notes: Optional[str] = None
+
+
 class KYCSynthesisOutput(BaseModel):
     """Output from Stage 3 synthesis."""
     evidence_graph: KYCEvidenceGraph = Field(default_factory=KYCEvidenceGraph)
@@ -366,6 +398,7 @@ class KYCSynthesisOutput(BaseModel):
     conditions: list[str] = Field(default_factory=list, description="Conditions for CONDITIONAL approval")
     items_requiring_review: list[str] = Field(default_factory=list)
     senior_management_approval_needed: bool = False
+    decision_points: list[DecisionPoint] = Field(default_factory=list)
 
 
 # =============================================================================

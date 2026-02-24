@@ -234,7 +234,61 @@ def generate_aml_operations_brief(
         lines.append("")
 
     # =========================================================================
-    # 8. Review Session Log
+    # 8. Disposition Analysis & Officer Decisions
+    # =========================================================================
+    if synthesis and synthesis.decision_points:
+        lines.append("## Disposition Analysis & Officer Decisions")
+        lines.append("")
+        for dp in synthesis.decision_points:
+            lines.append(f"### {dp.title}")
+            lines.append("")
+            lines.append(f"**System Recommendation:** {dp.disposition} ({dp.confidence:.0%} confidence)")
+            lines.append("")
+            lines.append(f"**Context:** {dp.context_summary}")
+            lines.append("")
+
+            # Counter-argument
+            ca = dp.counter_argument
+            lines.append("**Counter-Analysis:**")
+            lines.append(f"{ca.argument}")
+            lines.append("")
+            lines.append(f"**Risk if Disposition Incorrect:**")
+            lines.append(f"{ca.risk_if_wrong}")
+            lines.append("")
+
+            if ca.recommended_mitigations:
+                lines.append("**Recommended Mitigations:**")
+                for m in ca.recommended_mitigations:
+                    lines.append(f"- {m}")
+                lines.append("")
+
+            # Officer decision (if made)
+            if dp.officer_selection:
+                selected_opt = None
+                for opt in dp.options:
+                    if opt.option_id == dp.officer_selection:
+                        selected_opt = opt
+                        break
+                label = selected_opt.label if selected_opt else dp.officer_selection
+                lines.append(f"**Officer Decision:** {label} (Option {dp.officer_selection})")
+                if dp.officer_notes:
+                    lines.append(f"- Officer Notes: \"{dp.officer_notes}\"")
+                lines.append(f"- Counter-argument acknowledged: Yes")
+                lines.append("")
+            else:
+                # Show available options
+                lines.append("**Decision Options:**")
+                lines.append("")
+                lines.append("| Option | Label | Description | Onboarding Impact | Timeline |")
+                lines.append("|--------|-------|-------------|-------------------|----------|")
+                for opt in dp.options:
+                    lines.append(f"| {opt.option_id} | {opt.label} | {opt.description} | {opt.onboarding_impact} | {opt.timeline} |")
+                lines.append("")
+                lines.append("*Awaiting officer decision*")
+                lines.append("")
+
+    # =========================================================================
+    # 9. Review Session Log
     # =========================================================================
     if review_session and review_session.actions:
         lines.append("## Review Session Log")

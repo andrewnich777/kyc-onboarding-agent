@@ -168,6 +168,9 @@ class KYCPipeline:
         # Save Stage 3 outputs
         self._save_stage3_outputs(client_id, synthesis, plan)
 
+        # Display decision points requiring officer review
+        self._display_decision_points(synthesis)
+
         # Stage 4: Pause for Review
         self.log("\n[bold yellow]Stage 4: Review[/bold yellow]")
         self.log("  Proto-reports generated. Review and ask questions.")
@@ -235,6 +238,18 @@ class KYCPipeline:
         # Deserialize investigation results from checkpoint
         inv_data = checkpoint.get("investigation", {})
         investigation = self._deserialize_investigation(inv_data) if inv_data else InvestigationResults()
+
+        # Check for unresolved decision points
+        if synthesis and synthesis.decision_points:
+            unresolved = [
+                dp for dp in synthesis.decision_points
+                if dp.officer_selection is None
+            ]
+            if unresolved:
+                for dp in unresolved:
+                    self.log(f"  [bold yellow]Unresolved decision point: {dp.title}[/bold yellow]")
+                self.log(f"  [yellow]{len(unresolved)} decision point(s) without officer selection — "
+                         f"recording as pending in audit trail[/yellow]")
 
         # Apply deterministic recommendation engine as safety net
         final_decision = synthesis.recommended_decision if synthesis else None
@@ -723,6 +738,33 @@ class KYCPipeline:
             encoding="utf-8"
         )
 
+    def _display_decision_points(self, synthesis):
+        """Display decision points requiring officer review in the terminal."""
+        if not synthesis or not synthesis.decision_points:
+            return
+
+        console.print("\n[bold]Decision Points Requiring Officer Review:[/bold]\n")
+        for dp in synthesis.decision_points:
+            console.print(f"[bold yellow]{'━' * 60}[/bold yellow]")
+            console.print(f"[bold yellow]  {dp.title}[/bold yellow]")
+            console.print(f"[bold yellow]{'━' * 60}[/bold yellow]")
+            console.print(f"  Disposition: {dp.disposition} ({dp.confidence:.0%} confidence)")
+            console.print(f"  [dim]{dp.context_summary}[/dim]\n")
+            console.print(f"  [bold red]Counter-case:[/bold red]")
+            console.print(f"  {dp.counter_argument.argument}\n")
+            console.print(f"  [bold red]Risk if wrong:[/bold red] {dp.counter_argument.risk_if_wrong}\n")
+            if dp.counter_argument.recommended_mitigations:
+                mitigations = ", ".join(dp.counter_argument.recommended_mitigations)
+                console.print(f"  [dim]Mitigations: {mitigations}[/dim]\n")
+            console.print(f"  [bold]Options:[/bold]")
+            for opt in dp.options:
+                console.print(f"    [{opt.option_id}] [bold]{opt.label}[/bold] — {opt.description}")
+                for consequence in opt.consequences:
+                    console.print(f"        • {consequence}")
+                console.print(f"        Onboarding: {opt.onboarding_impact}")
+                console.print(f"        Timeline: {opt.timeline}")
+            console.print()
+
     def _save_stage3_outputs(self, client_id: str, synthesis, plan):
         """Save Stage 3 synthesis outputs and proto-reports."""
         synth_path = self.output_dir / client_id / "03_synthesis"
@@ -740,6 +782,16 @@ class KYCPipeline:
                 ),
                 encoding="utf-8"
             )
+
+            # Save decision points
+            if synthesis.decision_points:
+                (synth_path / "decision_points.json").write_text(
+                    json.dumps(
+                        [dp.model_dump() for dp in synthesis.decision_points],
+                        indent=2, default=str
+                    ),
+                    encoding="utf-8"
+                )
 
             # Generate proto-reports (4 department-targeted briefs)
             try:

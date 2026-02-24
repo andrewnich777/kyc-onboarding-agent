@@ -10,6 +10,7 @@ from models import (
     KYCSynthesisOutput, KYCEvidenceGraph, OnboardingDecision,
     RiskAssessment, RiskLevel,
     EvidenceRecord, EvidenceClass, DispositionStatus, Confidence,
+    CounterArgument, DecisionOption, DecisionPoint,
 )
 from logger import get_logger
 
@@ -49,6 +50,42 @@ class KYCSynthesisAgent(BaseAgent):
 - Never auto-approve high-risk clients
 - When evidence conflicts, explain both sides
 
+## Counter-Arguments & Decision Points
+
+For every non-trivial disposition in the investigation (sanctions matches not CLEAR, PEP classifications not NOT_PEP, adverse media rated MATERIAL_CONCERN or above), generate:
+
+1. A COUNTER-ARGUMENT: The strongest case AGAINST the recommended disposition, using the same evidence. Be specific — cite evidence IDs, name the risk factors, explain what pattern an auditor might flag. Write it as if you're a skeptical senior compliance officer reviewing junior work.
+
+2. DECISION OPTIONS: Present 3-4 concrete choices the compliance officer can make, each with:
+   - What the choice means operationally
+   - Downstream regulatory consequences (filing obligations, timelines, approval requirements)
+   - Impact on client onboarding (proceeds, paused, rejected)
+   - Expected timeline to resolution
+
+Standard decision options by disposition type:
+
+For sanctions dispositions (FALSE_POSITIVE, PENDING_REVIEW, POTENTIAL_MATCH):
+  A) CLEAR — Accept disposition, document reasoning, onboarding proceeds
+  B) ESCALATE — Senior AML analyst review, 30-day window, onboarding paused
+  C) REQUEST_DOCS — Request additional identity verification from client, onboarding paused
+  D) REJECT — Decline onboarding, document reasoning, consider STR filing
+
+For PEP classifications:
+  A) ACCEPT — Accept classification, apply required EDD measures, proceed with enhanced monitoring
+  B) ESCALATE — Senior management review (required within 30 days for foreign PEP)
+  C) REQUEST_DOCS — Request source of wealth/funds documentation before proceeding
+  D) REJECT — Decline onboarding
+
+For adverse media findings (MATERIAL_CONCERN or HIGH_RISK):
+  A) ACCEPT_WITH_MONITORING — Accept risk, implement enhanced monitoring schedule
+  B) ESCALATE — Senior review of media findings, assess STR consideration
+  C) REQUEST_DOCS — Request client explanation of flagged articles
+  D) REJECT — Decline onboarding
+
+Adapt the consequences for each option based on the client's specific risk tier, applicable regulations, and investigation findings. Reference actual timelines from compliance actions.
+
+For LOW risk clients with all-clear screening, do NOT generate counter-arguments or decision points. Just recommend APPROVE.
+
 {KYC_EVIDENCE_RULES}
 
 Return JSON with:
@@ -60,7 +97,8 @@ Return JSON with:
 - decision_reasoning: detailed explanation
 - conditions: array (for CONDITIONAL)
 - items_requiring_review: array (items the officer must review)
-- senior_management_approval_needed: boolean"""
+- senior_management_approval_needed: boolean
+- decision_points: array of {{decision_id, title, context_summary, disposition, confidence, counter_argument: {{evidence_id, disposition_challenged, argument, risk_if_wrong, recommended_mitigations}}, options: [{{option_id, label, description, consequences, onboarding_impact, timeline}}]}}"""
 
     @property
     def tools(self) -> list[str]:
@@ -119,6 +157,42 @@ Then recommend APPROVE, CONDITIONAL, ESCALATE, or DECLINE with detailed reasonin
             unresolved_items=graph_data.get("unresolved_items", []),
         )
 
+        # Parse decision points
+        decision_points = []
+        for dp_data in data.get("decision_points", []):
+            try:
+                ca_data = dp_data.get("counter_argument", {})
+                counter_arg = CounterArgument(
+                    evidence_id=ca_data.get("evidence_id", ""),
+                    disposition_challenged=ca_data.get("disposition_challenged", ""),
+                    argument=ca_data.get("argument", ""),
+                    risk_if_wrong=ca_data.get("risk_if_wrong", ""),
+                    recommended_mitigations=ca_data.get("recommended_mitigations", []),
+                )
+
+                options = []
+                for opt_data in dp_data.get("options", []):
+                    options.append(DecisionOption(
+                        option_id=opt_data.get("option_id", ""),
+                        label=opt_data.get("label", ""),
+                        description=opt_data.get("description", ""),
+                        consequences=opt_data.get("consequences", []),
+                        onboarding_impact=opt_data.get("onboarding_impact", ""),
+                        timeline=opt_data.get("timeline", ""),
+                    ))
+
+                decision_points.append(DecisionPoint(
+                    decision_id=dp_data.get("decision_id", f"dp_{len(decision_points)}"),
+                    title=dp_data.get("title", ""),
+                    context_summary=dp_data.get("context_summary", ""),
+                    disposition=dp_data.get("disposition", ""),
+                    confidence=float(dp_data.get("confidence", 0.0)),
+                    counter_argument=counter_arg,
+                    options=options,
+                ))
+            except Exception as e:
+                logger.warning(f"Could not parse decision point: {e}")
+
         return KYCSynthesisOutput(
             evidence_graph=graph,
             key_findings=data.get("key_findings", []),
@@ -129,4 +203,5 @@ Then recommend APPROVE, CONDITIONAL, ESCALATE, or DECLINE with detailed reasonin
             conditions=data.get("conditions", []),
             items_requiring_review=data.get("items_requiring_review", []),
             senior_management_approval_needed=data.get("senior_management_approval_needed", False),
+            decision_points=decision_points,
         )
