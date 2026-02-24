@@ -89,7 +89,7 @@ Be thorough but precise. Common names will have many results — focus on identi
         except ValueError:
             disposition = DispositionStatus.PENDING_REVIEW
 
-        return SanctionsResult(
+        sr = SanctionsResult(
             entity_screened=data.get("entity_screened", entity_name),
             screening_sources=data.get("screening_sources", []),
             matches=data.get("matches", []),
@@ -97,6 +97,8 @@ Be thorough but precise. Common names will have many results — focus on identi
             disposition_reasoning=data.get("disposition_reasoning", ""),
             evidence_records=self._build_evidence_records(data, entity_name),
         )
+        sr.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        return sr
 
     def _build_evidence_records(self, data: dict, entity_name: str) -> list[EvidenceRecord]:
         """Build evidence records from parsed data."""

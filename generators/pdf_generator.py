@@ -26,6 +26,24 @@ COLORS = {
         "accent": (220, 252, 231),
         "highlight": (34, 197, 94),
     },
+    "AML": {
+        "primary": (30, 58, 138),       # Deep blue (investigative)
+        "secondary": (29, 78, 216),
+        "accent": (219, 234, 254),
+        "highlight": (59, 130, 246),
+    },
+    "Risk": {
+        "primary": (180, 83, 9),        # Amber
+        "secondary": (217, 119, 6),
+        "accent": (254, 243, 199),
+        "highlight": (245, 158, 11),
+    },
+    "Regulatory": {
+        "primary": (88, 28, 135),       # Purple
+        "secondary": (126, 34, 206),
+        "accent": (243, 232, 255),
+        "highlight": (168, 85, 247),
+    },
 }
 
 # Risk level color bands for KYC
@@ -473,12 +491,20 @@ def generate_kyc_pdf(
     try:
         brief_type_map = {
             "compliance_officer_brief": "Compliance",
+            "aml_operations_brief": "AML",
+            "risk_assessment_brief": "Risk",
+            "regulatory_actions_brief": "Regulatory",
             "onboarding_summary": "Onboarding",
+            "onboarding_decision_brief": "Onboarding",
         }
         brief_type = brief_type_map.get(doc_type, "Compliance")
         title_map = {
             "compliance_officer_brief": "KYC Compliance Brief",
-            "onboarding_summary": "Onboarding Decision Summary",
+            "aml_operations_brief": "AML Operations Brief",
+            "risk_assessment_brief": "Risk Assessment Brief",
+            "regulatory_actions_brief": "Regulatory Actions Brief",
+            "onboarding_summary": "Onboarding Decision Brief",
+            "onboarding_decision_brief": "Onboarding Decision Brief",
         }
         title = title_map.get(doc_type, "KYC Report")
 

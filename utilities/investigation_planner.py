@@ -61,6 +61,7 @@ def build_investigation_plan(client) -> InvestigationPlan:
             "individual_fatca_crs",
             "edd_requirements",
             "compliance_actions",
+            "document_requirements",
         ]
     
     elif client_type == ClientType.BUSINESS:
@@ -78,6 +79,7 @@ def build_investigation_plan(client) -> InvestigationPlan:
             "business_risk_assessment",
             "edd_requirements",
             "compliance_actions",
+            "document_requirements",
         ]
         
         # UBO cascade — screen each beneficial owner individually

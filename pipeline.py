@@ -475,6 +475,9 @@ class KYCPipeline:
         elif util_name == "business_risk_assessment":
             from utilities.business_risk_assessment import assess_business_risk_factors
             return assess_business_risk_factors(client)
+        elif util_name == "document_requirements":
+            from utilities.document_requirements import consolidate_document_requirements
+            return consolidate_document_requirements(client, plan, investigation)
         else:
             raise ValueError(f"Unknown utility: {util_name}")
 
@@ -514,6 +517,8 @@ class KYCPipeline:
             results.compliance_actions = result
         elif util_name == "business_risk_assessment":
             results.business_risk_assessment = result
+        elif util_name == "document_requirements":
+            results.document_requirements = result
 
         # Add evidence records from utility (utilities use "evidence" key)
         if isinstance(result, dict):
@@ -600,7 +605,7 @@ class KYCPipeline:
 
     async def _run_final_reports(self, client_id: str, synthesis, plan, review_session,
                                 investigation: InvestigationResults = None):
-        """Stage 5: Generate final compliance brief and onboarding summary."""
+        """Stage 5: Generate final 4 department-targeted briefs + PDFs."""
         output_dir = self.output_dir / client_id / "05_output"
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -610,48 +615,85 @@ class KYCPipeline:
         if es_path.exists():
             evidence_store = json.loads(es_path.read_text(encoding="utf-8"))
 
-        # Generate compliance brief
+        risk_level = None
+        if plan and plan.preliminary_risk:
+            risk_level = plan.preliminary_risk.risk_level.value
+
+        # 1. AML Operations Brief
         try:
-            from generators.compliance_officer_brief import generate_compliance_brief
-            brief = generate_compliance_brief(
+            from generators.aml_operations_brief import generate_aml_operations_brief
+            brief = generate_aml_operations_brief(
                 client_id=client_id,
                 synthesis=synthesis,
                 plan=plan,
                 evidence_store=evidence_store,
                 review_session=review_session,
+                investigation=investigation,
             )
-            (output_dir / "compliance_officer_brief.md").write_text(brief, encoding="utf-8")
-            self.log(f"  [green]Compliance brief generated[/green]")
+            (output_dir / "aml_operations_brief.md").write_text(brief, encoding="utf-8")
+            self.log(f"  [green]AML operations brief generated[/green]")
         except Exception as e:
-            self.log(f"  [red]Compliance brief error: {e}[/red]")
-            logger.exception("Compliance brief generation failed")
+            self.log(f"  [red]AML operations brief error: {e}[/red]")
+            logger.exception("AML operations brief generation failed")
 
-        # Generate onboarding summary
+        # 2. Risk Assessment Brief
         try:
-            from generators.onboarding_summary import generate_onboarding_summary
-            summary = generate_onboarding_summary(
+            from generators.risk_assessment_brief import generate_risk_assessment_brief
+            brief = generate_risk_assessment_brief(
                 client_id=client_id,
                 synthesis=synthesis,
                 plan=plan,
                 investigation=investigation,
             )
-            (output_dir / "onboarding_summary.md").write_text(summary, encoding="utf-8")
-            self.log(f"  [green]Onboarding summary generated[/green]")
+            (output_dir / "risk_assessment_brief.md").write_text(brief, encoding="utf-8")
+            self.log(f"  [green]Risk assessment brief generated[/green]")
         except Exception as e:
-            self.log(f"  [red]Onboarding summary error: {e}[/red]")
-            logger.exception("Onboarding summary generation failed")
+            self.log(f"  [red]Risk assessment brief error: {e}[/red]")
+            logger.exception("Risk assessment brief generation failed")
 
-        # Generate PDFs
+        # 3. Regulatory Actions Brief
+        try:
+            from generators.regulatory_actions_brief import generate_regulatory_actions_brief
+            brief = generate_regulatory_actions_brief(
+                client_id=client_id,
+                synthesis=synthesis,
+                plan=plan,
+                investigation=investigation,
+            )
+            (output_dir / "regulatory_actions_brief.md").write_text(brief, encoding="utf-8")
+            self.log(f"  [green]Regulatory actions brief generated[/green]")
+        except Exception as e:
+            self.log(f"  [red]Regulatory actions brief error: {e}[/red]")
+            logger.exception("Regulatory actions brief generation failed")
+
+        # 4. Onboarding Decision Brief
+        try:
+            from generators.onboarding_summary import generate_onboarding_summary
+            brief = generate_onboarding_summary(
+                client_id=client_id,
+                synthesis=synthesis,
+                plan=plan,
+                investigation=investigation,
+            )
+            (output_dir / "onboarding_decision_brief.md").write_text(brief, encoding="utf-8")
+            self.log(f"  [green]Onboarding decision brief generated[/green]")
+        except Exception as e:
+            self.log(f"  [red]Onboarding decision brief error: {e}[/red]")
+            logger.exception("Onboarding decision brief generation failed")
+
+        # Generate PDFs for all 4 briefs
         try:
             from generators.pdf_generator import generate_kyc_pdf
-            for doc_name in ["compliance_officer_brief", "onboarding_summary"]:
+            for doc_name in [
+                "aml_operations_brief",
+                "risk_assessment_brief",
+                "regulatory_actions_brief",
+                "onboarding_decision_brief",
+            ]:
                 md_path = output_dir / f"{doc_name}.md"
                 if md_path.exists():
                     md_content = md_path.read_text(encoding="utf-8")
                     pdf_path = output_dir / f"{doc_name}.pdf"
-                    risk_level = None
-                    if plan and plan.preliminary_risk:
-                        risk_level = plan.preliminary_risk.risk_level.value
                     generate_kyc_pdf(md_content, str(pdf_path), doc_name, risk_level=risk_level)
                     self.log(f"  [green]PDF generated: {doc_name}.pdf[/green]")
         except Exception as e:
@@ -699,29 +741,51 @@ class KYCPipeline:
                 encoding="utf-8"
             )
 
-            # Generate proto-reports
+            # Generate proto-reports (4 department-targeted briefs)
             try:
-                from generators.compliance_officer_brief import generate_compliance_brief
-                proto_brief = generate_compliance_brief(
+                from generators.aml_operations_brief import generate_aml_operations_brief
+                proto = generate_aml_operations_brief(
                     client_id=client_id,
                     synthesis=synthesis,
                     plan=plan,
                     evidence_store=self.evidence_store,
                 )
-                (synth_path / "proto_compliance_brief.md").write_text(proto_brief, encoding="utf-8")
+                (synth_path / "proto_aml_operations_brief.md").write_text(proto, encoding="utf-8")
             except Exception as e:
-                logger.warning(f"Proto compliance brief failed: {e}")
+                logger.warning(f"Proto AML operations brief failed: {e}")
 
             try:
-                from generators.onboarding_summary import generate_onboarding_summary
-                proto_summary = generate_onboarding_summary(
+                from generators.risk_assessment_brief import generate_risk_assessment_brief
+                proto = generate_risk_assessment_brief(
                     client_id=client_id,
                     synthesis=synthesis,
                     plan=plan,
                 )
-                (synth_path / "proto_onboarding_summary.md").write_text(proto_summary, encoding="utf-8")
+                (synth_path / "proto_risk_assessment_brief.md").write_text(proto, encoding="utf-8")
             except Exception as e:
-                logger.warning(f"Proto onboarding summary failed: {e}")
+                logger.warning(f"Proto risk assessment brief failed: {e}")
+
+            try:
+                from generators.regulatory_actions_brief import generate_regulatory_actions_brief
+                proto = generate_regulatory_actions_brief(
+                    client_id=client_id,
+                    synthesis=synthesis,
+                    plan=plan,
+                )
+                (synth_path / "proto_regulatory_actions_brief.md").write_text(proto, encoding="utf-8")
+            except Exception as e:
+                logger.warning(f"Proto regulatory actions brief failed: {e}")
+
+            try:
+                from generators.onboarding_summary import generate_onboarding_summary
+                proto = generate_onboarding_summary(
+                    client_id=client_id,
+                    synthesis=synthesis,
+                    plan=plan,
+                )
+                (synth_path / "proto_onboarding_decision_brief.md").write_text(proto, encoding="utf-8")
+            except Exception as e:
+                logger.warning(f"Proto onboarding decision brief failed: {e}")
 
     def _save_review_session(self, client_id: str, session: ReviewSession):
         """Save review session data."""
@@ -746,6 +810,7 @@ class KYCPipeline:
         for field_name in [
             "id_verification", "suitability_assessment", "fatca_crs",
             "edd_requirements", "compliance_actions", "business_risk_assessment",
+            "document_requirements",
         ]:
             data[field_name] = getattr(investigation, field_name, None)
 
@@ -777,6 +842,7 @@ class KYCPipeline:
         for field_name in [
             "id_verification", "suitability_assessment", "fatca_crs",
             "edd_requirements", "compliance_actions", "business_risk_assessment",
+            "document_requirements",
         ]:
             setattr(results, field_name, data.get(field_name))
 

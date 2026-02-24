@@ -126,7 +126,7 @@ Steps:
                 confidence=Confidence.HIGH,
             ))
 
-        return SanctionsResult(
+        sr = SanctionsResult(
             entity_screened=data.get("entity_screened", entity_name),
             screening_sources=data.get("screening_sources", []),
             matches=data.get("matches", []),
@@ -135,3 +135,5 @@ Steps:
             ofac_50_percent_rule_applicable=data.get("ofac_50_percent_rule_applicable", False),
             evidence_records=records,
         )
+        sr.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        return sr

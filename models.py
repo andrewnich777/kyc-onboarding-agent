@@ -254,6 +254,7 @@ class SanctionsResult(BaseModel):
     disposition: DispositionStatus = Field(default=DispositionStatus.CLEAR)
     disposition_reasoning: Optional[str] = None
     ofac_50_percent_rule_applicable: bool = False
+    search_queries_executed: list[str] = Field(default_factory=list)
     evidence_records: list[EvidenceRecord] = Field(default_factory=list)
 
 
@@ -265,6 +266,9 @@ class PEPClassification(BaseModel):
     positions_found: list[dict] = Field(default_factory=list, description="[{position, organization, dates, source}]")
     family_associations: list[dict] = Field(default_factory=list)
     edd_required: bool = False
+    edd_expiry_date: Optional[str] = Field(default=None, description="ISO date when EDD expires (None=permanent)")
+    edd_permanent: bool = Field(default=False, description="True for FOREIGN_PEP — EDD never expires")
+    search_queries_executed: list[str] = Field(default_factory=list)
     evidence_records: list[EvidenceRecord] = Field(default_factory=list)
 
 
@@ -272,8 +276,9 @@ class AdverseMediaResult(BaseModel):
     """Result from adverse media screening."""
     entity_screened: str
     overall_level: AdverseMediaLevel = Field(default=AdverseMediaLevel.CLEAR)
-    articles_found: list[dict] = Field(default_factory=list, description="[{title, source, date, summary, category}]")
+    articles_found: list[dict] = Field(default_factory=list, description="[{title, source, date, summary, category, source_tier}]")
     categories: list[str] = Field(default_factory=list, description="fraud, money_laundering, regulatory, etc.")
+    search_queries_executed: list[str] = Field(default_factory=list)
     evidence_records: list[EvidenceRecord] = Field(default_factory=list)
 
 
@@ -285,6 +290,7 @@ class EntityVerification(BaseModel):
     registration_details: dict = Field(default_factory=dict)
     ubo_structure_verified: bool = False
     discrepancies: list[str] = Field(default_factory=list)
+    search_queries_executed: list[str] = Field(default_factory=list)
     evidence_records: list[EvidenceRecord] = Field(default_factory=list)
 
 
@@ -296,6 +302,8 @@ class JurisdictionRiskResult(BaseModel):
     sanctions_programs: list[dict] = Field(default_factory=list)
     fintrac_directives: list[str] = Field(default_factory=list)
     overall_jurisdiction_risk: RiskLevel = Field(default=RiskLevel.LOW)
+    jurisdiction_details: list[dict] = Field(default_factory=list, description="[{country, fatf_status, cpi_score, basel_aml_score}]")
+    search_queries_executed: list[str] = Field(default_factory=list)
     evidence_records: list[EvidenceRecord] = Field(default_factory=list)
 
 
@@ -321,6 +329,7 @@ class InvestigationResults(BaseModel):
     edd_requirements: Optional[dict] = None
     compliance_actions: Optional[dict] = None
     business_risk_assessment: Optional[dict] = None
+    document_requirements: Optional[dict] = None
 
     # UBO cascade results (business only)
     ubo_screening: dict[str, dict] = Field(
@@ -401,5 +410,9 @@ class KYCOutput(BaseModel):
     final_decision: Optional[OnboardingDecision] = None
     compliance_brief: str = ""
     onboarding_summary: str = ""
+    aml_operations_brief: str = ""
+    risk_assessment_brief: str = ""
+    regulatory_actions_brief: str = ""
+    onboarding_decision_brief: str = ""
     generated_at: datetime = Field(default_factory=datetime.now)
     duration_seconds: float = 0.0

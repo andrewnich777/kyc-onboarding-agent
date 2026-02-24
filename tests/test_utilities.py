@@ -159,6 +159,95 @@ class TestBusinessRiskAssessment:
         assert len(result["overall_narrative"]) > 0
 
 
+class TestDocumentRequirements:
+    def test_individual_requirements(self, individual_client_low):
+        from utilities.document_requirements import consolidate_document_requirements
+        from utilities.investigation_planner import build_investigation_plan
+        plan = build_investigation_plan(individual_client_low)
+        # Build a minimal investigation with id_verification
+        investigation = InvestigationResults()
+        investigation.id_verification = {
+            "method": "dual_process",
+            "status": "pending",
+            "requirements": ["Government-issued photo ID", "Proof of address"],
+        }
+        result = consolidate_document_requirements(individual_client_low, plan, investigation)
+        assert isinstance(result, dict)
+        assert "requirements" in result
+        assert isinstance(result["requirements"], list)
+        assert len(result["requirements"]) > 0
+        # Each requirement should have document and regulatory_basis keys
+        for req in result["requirements"]:
+            assert "document" in req
+            assert "regulatory_basis" in req
+
+    def test_business_requirements(self, business_client_critical):
+        from utilities.document_requirements import consolidate_document_requirements
+        from utilities.investigation_planner import build_investigation_plan
+        plan = build_investigation_plan(business_client_critical)
+        investigation = InvestigationResults()
+        investigation.id_verification = {
+            "method": "corporate_registry",
+            "status": "pending",
+            "requirements": [],
+        }
+        result = consolidate_document_requirements(business_client_critical, plan, investigation)
+        assert isinstance(result, dict)
+        assert "requirements" in result
+        # Business should have entity verification docs
+        docs = [r["document"].lower() for r in result["requirements"]]
+        assert any("incorporation" in d for d in docs)
+        assert "total_required" in result
+        assert "total_outstanding" in result
+
+
+class TestComplianceActionsDateCalc:
+    def test_computed_deadline_present(self, individual_client_low):
+        from utilities.compliance_actions import determine_compliance_actions
+        risk = RiskAssessment(total_score=5, risk_level=RiskLevel.LOW)
+        result = determine_compliance_actions(individual_client_low, risk)
+        timelines = result.get("timelines", {})
+        # risk_review should have computed_deadline
+        assert "risk_review" in timelines
+        assert "computed_deadline" in timelines["risk_review"]
+        # Verify it's a valid date string
+        deadline = timelines["risk_review"]["computed_deadline"]
+        assert len(deadline) == 10  # YYYY-MM-DD format
+
+    def test_report_deadlines_computed(self, individual_client_pep):
+        from utilities.compliance_actions import determine_compliance_actions
+        risk = RiskAssessment(total_score=52, risk_level=RiskLevel.HIGH)
+        result = determine_compliance_actions(individual_client_pep, risk)
+        timelines = result.get("timelines", {})
+        # Any report timeline entry should have computed_deadline
+        for key, tl in timelines.items():
+            if key in ("STR", "TPR", "FATCA", "CRS", "LCTR"):
+                assert "computed_deadline" in tl, f"Missing computed_deadline for {key}"
+
+
+class TestEDDMonitoringSchedule:
+    def test_monitoring_schedule_present(self, individual_client_low):
+        from utilities.edd_requirements import assess_edd_requirements
+        risk = RiskAssessment(total_score=5, risk_level=RiskLevel.LOW)
+        result = assess_edd_requirements(individual_client_low, risk)
+        assert "monitoring_schedule" in result
+        schedule = result["monitoring_schedule"]
+        assert "frequency" in schedule
+        assert "next_review_date" in schedule
+        assert "review_interval_days" in schedule
+        # Verify next_review_date is a valid date string
+        assert len(schedule["next_review_date"]) == 10
+
+    def test_high_risk_monitoring_frequency(self, individual_client_pep):
+        from utilities.edd_requirements import assess_edd_requirements
+        risk = RiskAssessment(total_score=52, risk_level=RiskLevel.HIGH)
+        result = assess_edd_requirements(individual_client_pep, risk)
+        schedule = result["monitoring_schedule"]
+        # HIGH risk should be quarterly (90 days)
+        assert schedule["frequency"] == "quarterly"
+        assert schedule["review_interval_days"] == 90
+
+
 class TestReferenceData:
     def test_fatf_lists_populated(self):
         from utilities.reference_data import FATF_GREY_LIST, FATF_BLACK_LIST

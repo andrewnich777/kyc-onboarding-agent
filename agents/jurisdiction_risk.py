@@ -48,6 +48,9 @@ Return JSON with:
 - sanctions_programs: array of {{country, program, administering_body}}
 - fintrac_directives: array of directive descriptions
 - overall_jurisdiction_risk: LOW | MEDIUM | HIGH | CRITICAL
+- jurisdiction_details: array of {{country, fatf_status, cpi_score, cpi_rank, basel_aml_score}}
+  cpi_score: Transparency International CPI score (0-100, higher=less corrupt)
+  basel_aml_score: Basel AML Index score (0-10, higher=more risk)
 - evidence_records: array"""
 
     @property
@@ -64,8 +67,11 @@ For EACH jurisdiction:
 1. Check current FATF grey/black list status
 2. Check active OFAC sanctions programs
 3. Check for FINTRAC directives
-4. Assess overall AML framework strength
+4. Look up Corruption Perception Index (CPI) score and rank
+5. Look up Basel AML Index score if available
+6. Assess overall AML framework strength
 
+Include per-jurisdiction details with CPI and Basel scores.
 Provide an overall jurisdiction risk level."""
 
         result = await self.run(prompt)
@@ -118,12 +124,31 @@ Provide an overall jurisdiction risk level."""
                 confidence=Confidence.HIGH,
             ))
 
-        return JurisdictionRiskResult(
+        # Build jurisdiction_details from agent response or fallback from FATF lists
+        jurisdiction_details = data.get("jurisdiction_details", [])
+        if not jurisdiction_details:
+            for country in data.get("jurisdictions_assessed", jurisdictions):
+                fatf_status = "clean"
+                if country in data.get("fatf_black_list", []):
+                    fatf_status = "black_list"
+                elif country in data.get("fatf_grey_list", []):
+                    fatf_status = "grey_list"
+                jurisdiction_details.append({
+                    "country": country,
+                    "fatf_status": fatf_status,
+                    "cpi_score": None,
+                    "basel_aml_score": None,
+                })
+
+        jr = JurisdictionRiskResult(
             jurisdictions_assessed=data.get("jurisdictions_assessed", jurisdictions),
             fatf_grey_list=data.get("fatf_grey_list", []),
             fatf_black_list=data.get("fatf_black_list", []),
             sanctions_programs=data.get("sanctions_programs", []),
             fintrac_directives=data.get("fintrac_directives", []),
             overall_jurisdiction_risk=level,
+            jurisdiction_details=jurisdiction_details,
             evidence_records=records,
         )
+        jr.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        return jr

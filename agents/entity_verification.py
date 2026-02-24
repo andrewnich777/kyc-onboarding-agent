@@ -113,7 +113,7 @@ Steps:
                 confidence=Confidence.MEDIUM,
             ))
 
-        return EntityVerification(
+        ev = EntityVerification(
             entity_name=data.get("entity_name", entity_name),
             verified_registration=verified,
             registry_sources=data.get("registry_sources", []),
@@ -122,3 +122,5 @@ Steps:
             discrepancies=data.get("discrepancies", []),
             evidence_records=records,
         )
+        ev.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        return ev

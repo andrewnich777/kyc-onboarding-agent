@@ -4,6 +4,7 @@ Classifies individuals per FINTRAC PEP categories.
 """
 
 import json
+import re as _re
 from agents.base import BaseAgent, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_REGULATORY_CONTEXT
 from models import PEPClassification, PEPLevel, EvidenceRecord, EvidenceClass, DispositionStatus, Confidence
 from logger import get_logger
@@ -98,15 +99,42 @@ For foreign PEPs: EDD is permanent regardless of when they left office."""
         except ValueError:
             pass
 
-        return PEPClassification(
+        # EDD timeline calculation
+        edd_permanent = False
+        edd_expiry_date = None
+        if level == PEPLevel.FOREIGN_PEP:
+            edd_permanent = True
+        elif level in (PEPLevel.DOMESTIC_PEP, PEPLevel.HIO):
+            positions = data.get("positions_found", [])
+            latest_end = None
+            for pos in positions:
+                dates = str(pos.get("dates", ""))
+                if "present" in dates.lower() or "current" in dates.lower():
+                    edd_permanent = True
+                    break
+                years = _re.findall(r'20\d{2}', dates)
+                if years:
+                    end_year = max(int(y) for y in years)
+                    if latest_end is None or end_year > latest_end:
+                        latest_end = end_year
+            if not edd_permanent and latest_end:
+                edd_expiry_date = f"{latest_end + 5}-01-01"
+        elif level in (PEPLevel.PEP_FAMILY, PEPLevel.PEP_ASSOCIATE):
+            edd_permanent = True
+
+        pep = PEPClassification(
             entity_screened=data.get("entity_screened", entity_name),
             self_declared=data.get("self_declared", self_declared),
             detected_level=level,
             positions_found=data.get("positions_found", []),
             family_associations=data.get("family_associations", []),
             edd_required=data.get("edd_required", level != PEPLevel.NOT_PEP),
+            edd_expiry_date=edd_expiry_date,
+            edd_permanent=edd_permanent,
             evidence_records=self._build_evidence_records(data, entity_name, level),
         )
+        pep.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        return pep
 
     def _build_evidence_records(self, data: dict, entity_name: str, level: PEPLevel) -> list[EvidenceRecord]:
         records = []

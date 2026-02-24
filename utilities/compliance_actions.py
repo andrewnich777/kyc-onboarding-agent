@@ -6,7 +6,7 @@ and escalation requirements based on client risk profile and investigation
 findings. Pure deterministic logic, no API calls.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from models import (
     RiskAssessment, RiskLevel,
     InvestigationResults,
@@ -476,29 +476,50 @@ def _determine_actions(
 def _determine_timelines(reports: list, risk_assessment: RiskAssessment) -> dict:
     """Build a timelines dict from reports and risk level."""
     timelines = {}
+    today = datetime.now()
 
+    # Compute deadlines for report types
     for report in reports:
         report_type = report["type"]
+        computed_deadline = None
+
+        if report_type == "STR":
+            computed_deadline = (today + timedelta(days=30)).strftime("%Y-%m-%d")
+        elif report_type == "TPR":
+            computed_deadline = today.strftime("%Y-%m-%d")
+        elif report_type in ("FATCA", "CRS"):
+            # Next May 1
+            next_may = datetime(today.year, 5, 1)
+            if today >= next_may:
+                next_may = datetime(today.year + 1, 5, 1)
+            computed_deadline = next_may.strftime("%Y-%m-%d")
+        elif report_type == "LCTR":
+            computed_deadline = (today + timedelta(days=15)).strftime("%Y-%m-%d")
+
         timelines[report_type] = {
             "deadline": report["timeline"],
             "filing_decision": report["filing_decision"],
+            "computed_deadline": computed_deadline,
         }
 
     # Add standard timelines
     timelines["initial_review"] = {
         "deadline": "Before onboarding completion",
         "description": "Complete all KYC checks and obtain required approvals",
+        "computed_deadline": today.strftime("%Y-%m-%d"),
     }
 
     if risk_assessment.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL):
         timelines["risk_review"] = {
             "deadline": "Within 12 months of onboarding",
             "description": "First periodic risk review for high/critical clients",
+            "computed_deadline": (today + timedelta(days=365)).strftime("%Y-%m-%d"),
         }
     else:
         timelines["risk_review"] = {
             "deadline": "Within 24 months of onboarding",
             "description": "First periodic risk review",
+            "computed_deadline": (today + timedelta(days=730)).strftime("%Y-%m-%d"),
         }
 
     timelines["document_retention"] = {

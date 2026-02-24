@@ -7,7 +7,7 @@ specific EDD measures that must be applied.
 Pure deterministic logic, no API calls.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from models import (
     RiskAssessment, RiskLevel,
     IndividualClient, BusinessClient,
@@ -163,12 +163,27 @@ def assess_edd_requirements(
             "timestamp": timestamp,
         })
 
+    # Monitoring schedule with computed next review date
+    freq_days_map = {
+        "monthly": 30,
+        "quarterly": 90,
+        "semi_annual": 180,
+        "annual": 365,
+    }
+    freq_days = freq_days_map.get(monitoring_frequency, 365)
+    monitoring_schedule = {
+        "frequency": monitoring_frequency,
+        "next_review_date": (datetime.now() + timedelta(days=freq_days)).strftime("%Y-%m-%d"),
+        "review_interval_days": freq_days,
+    }
+
     return {
         "edd_required": edd_required,
         "triggers": triggers,
         "measures": measures,
         "approval_required": approval_required,
         "monitoring_frequency": monitoring_frequency,
+        "monitoring_schedule": monitoring_schedule,
         "evidence": evidence,
     }
 

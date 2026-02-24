@@ -41,7 +41,8 @@ Also check:
 Return JSON with:
 - entity_screened: entity name
 - overall_level: CLEAR | LOW_CONCERN | MATERIAL_CONCERN | HIGH_RISK
-- articles_found: array of {{title, source, date, summary, category}}
+- articles_found: array of {{title, source, date, summary, category, source_tier}}
+  source_tier: TIER_0 (government/court records), TIER_1 (major established media), TIER_2 (other/blogs)
 - categories: array
 - evidence_records: array"""
 
@@ -100,10 +101,12 @@ Run ALL mandatory searches and classify findings by severity."""
                 confidence=Confidence.HIGH,
             ))
 
-        return AdverseMediaResult(
+        amr = AdverseMediaResult(
             entity_screened=data.get("entity_screened", entity_name),
             overall_level=level,
             articles_found=data.get("articles_found", []),
             categories=data.get("categories", []),
             evidence_records=records,
         )
+        amr.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        return amr
