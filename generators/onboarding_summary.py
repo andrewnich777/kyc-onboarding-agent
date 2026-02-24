@@ -5,20 +5,7 @@ Go/no-go decision summary for Brokerage Ops.
 
 from datetime import datetime
 
-
-def _extract_ubo_status(ubo_data: dict, screening_type: str, field: str) -> str:
-    """Extract a human-readable status from UBO screening data."""
-    if not ubo_data:
-        return "Pending"
-    result = ubo_data.get(screening_type)
-    if not result:
-        return "Pending"
-    if isinstance(result, dict):
-        value = result.get(field, "Pending")
-        if value == "CLEAR" or value == "NOT_PEP":
-            return "Clear"
-        return str(value).replace("_", " ").title()
-    return "Pending"
+from generators.ubo_helpers import extract_ubo_field as _extract_ubo_status
 
 
 def generate_onboarding_summary(

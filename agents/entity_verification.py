@@ -89,28 +89,19 @@ Steps:
         verified = data.get("verified_registration", False)
 
         records = []
-        records.append(EvidenceRecord(
-            evidence_id="ev_reg_0",
-            source_type="agent",
-            source_name=self.name,
-            entity_screened=entity_name,
-            claim="Entity registration: " + ("Verified" if verified else "Not verified"),
+        records.append(self._build_finding_record(
+            "ev_reg_0", entity_name,
+            "Entity registration: " + ("Verified" if verified else "Not verified"),
+            [data.get("registration_details", {})],
             evidence_level=EvidenceClass.SOURCED if verified else EvidenceClass.UNKNOWN,
-            supporting_data=[data.get("registration_details", {})],
             disposition=DispositionStatus.CLEAR if verified else DispositionStatus.PENDING_REVIEW,
             confidence=Confidence.HIGH if verified else Confidence.LOW,
         ))
 
         for i, disc in enumerate(data.get("discrepancies", [])):
-            records.append(EvidenceRecord(
-                evidence_id=f"ev_disc_{i}",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=entity_name,
-                claim=f"Discrepancy: {disc}",
-                evidence_level=EvidenceClass.SOURCED,
-                disposition=DispositionStatus.PENDING_REVIEW,
-                confidence=Confidence.MEDIUM,
+            records.append(self._build_finding_record(
+                f"ev_disc_{i}", entity_name,
+                f"Discrepancy: {disc}",
             ))
 
         ev = EntityVerification(
@@ -122,5 +113,5 @@ Steps:
             discrepancies=data.get("discrepancies", []),
             evidence_records=records,
         )
-        ev.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        self._attach_search_queries(ev, result)
         return ev

@@ -7,6 +7,8 @@ Replaces the Compliance Officer Brief with richer detail.
 from datetime import datetime
 from typing import Optional
 
+from generators.ubo_helpers import extract_ubo_field as _extract_ubo_field
+
 
 def generate_aml_operations_brief(
     client_id: str,
@@ -314,14 +316,3 @@ def generate_aml_operations_brief(
     return "\n".join(lines)
 
 
-def _extract_ubo_field(ubo_data: dict, screening_type: str, field: str, default: str = "Pending") -> str:
-    """Extract a human-readable status from UBO screening data."""
-    if not ubo_data:
-        return default
-    result = ubo_data.get(screening_type)
-    if not result or not isinstance(result, dict):
-        return default
-    value = result.get(field, default)
-    if value in ("CLEAR", "NOT_PEP"):
-        return "Clear"
-    return str(value).replace("_", " ").title()

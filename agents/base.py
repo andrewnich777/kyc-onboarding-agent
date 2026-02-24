@@ -74,6 +74,21 @@ def get_api_key() -> str | None:
     return _API_KEY or os.environ.get("ANTHROPIC_API_KEY")
 
 
+def _safe_parse_enum(enum_class, raw_value: str, default, fallback=None):
+    """Parse a string into an enum, returning default/fallback on failure.
+
+    Args:
+        enum_class: The enum type (e.g. DispositionStatus).
+        raw_value: Raw string to parse (will be uppercased).
+        default: Default enum value if raw_value is empty/None.
+        fallback: Value to return on ValueError. If None, returns default.
+    """
+    try:
+        return enum_class(raw_value.upper() if raw_value else default.value)
+    except (ValueError, AttributeError):
+        return fallback if fallback is not None else default
+
+
 class BaseAgent(ABC):
     """
     Base class for all research agents.
@@ -191,6 +206,67 @@ class BaseAgent(ABC):
     def search_context(self) -> str:
         """Get search context from pipeline (previously searched queries)."""
         return self._search_context or ""
+
+    # =========================================================================
+    # Evidence Record Helpers
+    # =========================================================================
+
+    def _build_finding_record(
+        self,
+        evidence_id: str,
+        entity: str,
+        claim: str,
+        supporting_data: list = None,
+        *,
+        evidence_level=None,
+        disposition=None,
+        confidence=None,
+    ):
+        """Build a standard evidence record for a finding.
+
+        Imports are done at call time to avoid circular imports at module level.
+        """
+        from models import EvidenceRecord, EvidenceClass, DispositionStatus, Confidence as Conf
+        return EvidenceRecord(
+            evidence_id=evidence_id,
+            source_type="agent",
+            source_name=self.name,
+            entity_screened=entity,
+            claim=claim,
+            evidence_level=evidence_level or EvidenceClass.SOURCED,
+            supporting_data=supporting_data or [],
+            disposition=disposition or DispositionStatus.PENDING_REVIEW,
+            confidence=confidence or Conf.MEDIUM,
+        )
+
+    def _build_clear_record(
+        self,
+        evidence_id: str,
+        entity: str,
+        claim: str,
+        supporting_data: list = None,
+        *,
+        disposition_reasoning: str = None,
+    ):
+        """Build a standard 'no findings' evidence record."""
+        from models import EvidenceRecord, EvidenceClass, DispositionStatus, Confidence as Conf
+        return EvidenceRecord(
+            evidence_id=evidence_id,
+            source_type="agent",
+            source_name=self.name,
+            entity_screened=entity,
+            claim=claim,
+            evidence_level=EvidenceClass.SOURCED,
+            supporting_data=supporting_data or [],
+            disposition=DispositionStatus.CLEAR,
+            disposition_reasoning=disposition_reasoning,
+            confidence=Conf.HIGH,
+        )
+
+    @staticmethod
+    def _attach_search_queries(result_obj, raw_result: dict):
+        """Attach search_queries_executed from API result to a model object."""
+        result_obj.search_queries_executed = raw_result.get("search_stats", {}).get("search_queries", [])
 
     async def execute_tool_call(self, tool_name: str, tool_input: dict) -> Any:
         """

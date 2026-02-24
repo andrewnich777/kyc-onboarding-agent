@@ -3,7 +3,7 @@ Individual Adverse Media Screening Agent.
 5 search queries covering fraud, money laundering, regulatory, employer, bankruptcy.
 """
 
-from agents.base import BaseAgent, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_REGULATORY_CONTEXT
+from agents.base import BaseAgent, _safe_parse_enum, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_REGULATORY_CONTEXT
 from models import AdverseMediaResult, AdverseMediaLevel, EvidenceRecord, EvidenceClass, DispositionStatus, Confidence
 from logger import get_logger
 
@@ -67,7 +67,7 @@ Citizenship: {citizenship or 'Not provided'}""" + employer_line + f"""
 
 Run ALL 5 mandatory search queries:
 1. "{full_name}" fraud OR lawsuit OR criminal
-2. "{full_name}" money laundering OR corruption OR bribery  
+2. "{full_name}" money laundering OR corruption OR bribery
 3. "{full_name}" regulatory action OR sanctions
 4. "{full_name}"{employer_query} controversy OR investigation
 5. "{full_name}" bankruptcy OR insolvency
@@ -83,37 +83,20 @@ For each finding, classify severity and relevance."""
         if not data:
             return AdverseMediaResult(entity_screened=entity_name)
 
-        level = AdverseMediaLevel.CLEAR
-        level_str = data.get("overall_level", "CLEAR").upper()
-        try:
-            level = AdverseMediaLevel(level_str)
-        except ValueError:
-            pass
+        level = _safe_parse_enum(AdverseMediaLevel, data.get("overall_level", "CLEAR"), AdverseMediaLevel.CLEAR)
 
         records = []
         for i, article in enumerate(data.get("articles_found", [])):
-            records.append(EvidenceRecord(
-                evidence_id=f"adv_ind_{i}",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=entity_name,
-                claim=f"Adverse media: {article.get('title', 'Unknown')}",
-                evidence_level=EvidenceClass.SOURCED,
-                supporting_data=[article],
-                disposition=DispositionStatus.PENDING_REVIEW,
-                confidence=Confidence.MEDIUM,
+            records.append(self._build_finding_record(
+                f"adv_ind_{i}", entity_name,
+                f"Adverse media: {article.get('title', 'Unknown')}",
+                [article],
             ))
 
         if not records:
-            records.append(EvidenceRecord(
-                evidence_id="adv_ind_clear",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=entity_name,
-                claim="No adverse media found",
-                evidence_level=EvidenceClass.SOURCED,
-                disposition=DispositionStatus.CLEAR,
-                confidence=Confidence.HIGH,
+            records.append(self._build_clear_record(
+                "adv_ind_clear", entity_name,
+                "No adverse media found",
             ))
 
         amr = AdverseMediaResult(
@@ -123,5 +106,5 @@ For each finding, classify severity and relevance."""
             categories=data.get("categories", []),
             evidence_records=records,
         )
-        amr.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        self._attach_search_queries(amr, result)
         return amr

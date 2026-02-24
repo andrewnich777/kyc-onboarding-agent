@@ -3,7 +3,7 @@ Entity Sanctions Screening Agent.
 Entity screening + OFAC 50% rule.
 """
 
-from agents.base import BaseAgent, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_FALSE_POSITIVE_RULES, KYC_REGULATORY_CONTEXT
+from agents.base import BaseAgent, _safe_parse_enum, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_FALSE_POSITIVE_RULES, KYC_REGULATORY_CONTEXT
 from models import SanctionsResult, EvidenceRecord, EvidenceClass, DispositionStatus, Confidence
 from logger import get_logger
 
@@ -94,36 +94,23 @@ Steps:
                 disposition=DispositionStatus.PENDING_REVIEW,
             )
 
-        disposition = DispositionStatus.CLEAR
-        try:
-            disposition = DispositionStatus(data.get("disposition", "CLEAR").upper())
-        except ValueError:
-            disposition = DispositionStatus.PENDING_REVIEW
+        disposition = _safe_parse_enum(
+            DispositionStatus, data.get("disposition", "CLEAR"),
+            DispositionStatus.CLEAR, fallback=DispositionStatus.PENDING_REVIEW,
+        )
 
         records = []
         for i, match in enumerate(data.get("matches", [])):
-            records.append(EvidenceRecord(
-                evidence_id=f"san_ent_{i}",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=entity_name,
-                claim=f"Entity sanctions match: {match.get('matched_name', 'unknown')}",
-                evidence_level=EvidenceClass.SOURCED,
-                supporting_data=[match],
-                disposition=DispositionStatus.PENDING_REVIEW,
-                confidence=Confidence.MEDIUM,
+            records.append(self._build_finding_record(
+                f"san_ent_{i}", entity_name,
+                f"Entity sanctions match: {match.get('matched_name', 'unknown')}",
+                [match],
             ))
 
         if not records:
-            records.append(EvidenceRecord(
-                evidence_id="san_ent_clear",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=entity_name,
-                claim="No entity sanctions matches found",
-                evidence_level=EvidenceClass.SOURCED,
-                disposition=DispositionStatus.CLEAR,
-                confidence=Confidence.HIGH,
+            records.append(self._build_clear_record(
+                "san_ent_clear", entity_name,
+                "No entity sanctions matches found",
             ))
 
         sr = SanctionsResult(
@@ -135,5 +122,5 @@ Steps:
             ofac_50_percent_rule_applicable=data.get("ofac_50_percent_rule_applicable", False),
             evidence_records=records,
         )
-        sr.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        self._attach_search_queries(sr, result)
         return sr

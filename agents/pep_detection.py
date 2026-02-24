@@ -5,7 +5,7 @@ Classifies individuals per FINTRAC PEP categories.
 
 import json
 import re as _re
-from agents.base import BaseAgent, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_REGULATORY_CONTEXT
+from agents.base import BaseAgent, _safe_parse_enum, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_REGULATORY_CONTEXT
 from models import PEPClassification, PEPLevel, EvidenceRecord, EvidenceClass, DispositionStatus, Confidence
 from logger import get_logger
 
@@ -92,12 +92,7 @@ For foreign PEPs: EDD is permanent regardless of when they left office."""
                 detected_level=PEPLevel.NOT_PEP,
             )
 
-        level = PEPLevel.NOT_PEP
-        level_str = data.get("detected_level", "NOT_PEP").upper()
-        try:
-            level = PEPLevel(level_str)
-        except ValueError:
-            pass
+        level = _safe_parse_enum(PEPLevel, data.get("detected_level", "NOT_PEP"), PEPLevel.NOT_PEP)
 
         # EDD timeline calculation
         edd_permanent = False
@@ -133,34 +128,21 @@ For foreign PEPs: EDD is permanent regardless of when they left office."""
             edd_permanent=edd_permanent,
             evidence_records=self._build_evidence_records(data, entity_name, level),
         )
-        pep.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        self._attach_search_queries(pep, result)
         return pep
 
     def _build_evidence_records(self, data: dict, entity_name: str, level: PEPLevel) -> list[EvidenceRecord]:
         records = []
         if level != PEPLevel.NOT_PEP:
             for i, pos in enumerate(data.get("positions_found", [])):
-                records.append(EvidenceRecord(
-                    evidence_id=f"pep_{i}",
-                    source_type="agent",
-                    source_name=self.name,
-                    entity_screened=entity_name,
-                    claim=f"PEP position: {pos.get('position', 'unknown')} at {pos.get('organization', 'unknown')}",
-                    evidence_level=EvidenceClass.SOURCED,
-                    supporting_data=[pos],
-                    disposition=DispositionStatus.PENDING_REVIEW,
-                    confidence=Confidence.MEDIUM,
+                records.append(self._build_finding_record(
+                    f"pep_{i}", entity_name,
+                    f"PEP position: {pos.get('position', 'unknown')} at {pos.get('organization', 'unknown')}",
+                    [pos],
                 ))
         else:
-            records.append(EvidenceRecord(
-                evidence_id="pep_clear",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=entity_name,
-                claim="No PEP status detected",
-                evidence_level=EvidenceClass.SOURCED,
-                supporting_data=[],
-                disposition=DispositionStatus.CLEAR,
-                confidence=Confidence.HIGH,
+            records.append(self._build_clear_record(
+                "pep_clear", entity_name,
+                "No PEP status detected",
             ))
         return records

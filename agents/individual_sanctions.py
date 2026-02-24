@@ -4,7 +4,7 @@ Screens individuals against CSL, OpenSanctions, Canadian sanctions, UN list.
 """
 
 import json
-from agents.base import BaseAgent, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_FALSE_POSITIVE_RULES, KYC_REGULATORY_CONTEXT
+from agents.base import BaseAgent, _safe_parse_enum, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_FALSE_POSITIVE_RULES, KYC_REGULATORY_CONTEXT
 from models import SanctionsResult, EvidenceRecord, EvidenceClass, DispositionStatus, Confidence
 from logger import get_logger
 
@@ -82,12 +82,10 @@ Be thorough but precise. Common names will have many results — focus on identi
                 disposition_reasoning="Agent did not return structured data — manual review required",
             )
 
-        disposition = DispositionStatus.CLEAR
-        disp_str = data.get("disposition", "CLEAR").upper()
-        try:
-            disposition = DispositionStatus(disp_str)
-        except ValueError:
-            disposition = DispositionStatus.PENDING_REVIEW
+        disposition = _safe_parse_enum(
+            DispositionStatus, data.get("disposition", "CLEAR"),
+            DispositionStatus.CLEAR, fallback=DispositionStatus.PENDING_REVIEW,
+        )
 
         sr = SanctionsResult(
             entity_screened=data.get("entity_screened", entity_name),
@@ -97,37 +95,25 @@ Be thorough but precise. Common names will have many results — focus on identi
             disposition_reasoning=data.get("disposition_reasoning", ""),
             evidence_records=self._build_evidence_records(data, entity_name),
         )
-        sr.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        self._attach_search_queries(sr, result)
         return sr
 
     def _build_evidence_records(self, data: dict, entity_name: str) -> list[EvidenceRecord]:
         """Build evidence records from parsed data."""
         records = []
         for i, match in enumerate(data.get("matches", [])):
-            records.append(EvidenceRecord(
-                evidence_id=f"san_ind_{i}",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=entity_name,
-                claim=f"Sanctions match: {match.get('matched_name', 'unknown')} on {match.get('list_name', 'unknown')}",
-                evidence_level=EvidenceClass.SOURCED,
-                supporting_data=[match],
-                disposition=DispositionStatus.PENDING_REVIEW,
-                confidence=Confidence.MEDIUM,
+            records.append(self._build_finding_record(
+                f"san_ind_{i}", entity_name,
+                f"Sanctions match: {match.get('matched_name', 'unknown')} on {match.get('list_name', 'unknown')}",
+                [match],
             ))
 
         if not records:
-            records.append(EvidenceRecord(
-                evidence_id="san_ind_clear",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=entity_name,
-                claim="No sanctions matches found across all screening sources",
-                evidence_level=EvidenceClass.SOURCED,
-                supporting_data=[{"sources_checked": data.get("screening_sources", [])}],
-                disposition=DispositionStatus.CLEAR,
+            records.append(self._build_clear_record(
+                "san_ind_clear", entity_name,
+                "No sanctions matches found across all screening sources",
+                [{"sources_checked": data.get("screening_sources", [])}],
                 disposition_reasoning=data.get("disposition_reasoning", "No matches"),
-                confidence=Confidence.HIGH,
             ))
 
         return records

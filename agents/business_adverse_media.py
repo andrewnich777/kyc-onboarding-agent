@@ -3,7 +3,7 @@ Business Adverse Media Screening Agent.
 Entity-specific searches including trade compliance, environmental, labor violations.
 """
 
-from agents.base import BaseAgent, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_REGULATORY_CONTEXT
+from agents.base import BaseAgent, _safe_parse_enum, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_REGULATORY_CONTEXT
 from models import AdverseMediaResult, AdverseMediaLevel, EvidenceRecord, EvidenceClass, DispositionStatus, Confidence
 from logger import get_logger
 
@@ -69,36 +69,20 @@ Run ALL mandatory searches and classify findings by severity."""
         if not data:
             return AdverseMediaResult(entity_screened=entity_name)
 
-        level = AdverseMediaLevel.CLEAR
-        try:
-            level = AdverseMediaLevel(data.get("overall_level", "CLEAR").upper())
-        except ValueError:
-            pass
+        level = _safe_parse_enum(AdverseMediaLevel, data.get("overall_level", "CLEAR"), AdverseMediaLevel.CLEAR)
 
         records = []
         for i, article in enumerate(data.get("articles_found", [])):
-            records.append(EvidenceRecord(
-                evidence_id=f"adv_biz_{i}",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=entity_name,
-                claim=f"Business adverse media: {article.get('title', 'Unknown')}",
-                evidence_level=EvidenceClass.SOURCED,
-                supporting_data=[article],
-                disposition=DispositionStatus.PENDING_REVIEW,
-                confidence=Confidence.MEDIUM,
+            records.append(self._build_finding_record(
+                f"adv_biz_{i}", entity_name,
+                f"Business adverse media: {article.get('title', 'Unknown')}",
+                [article],
             ))
 
         if not records:
-            records.append(EvidenceRecord(
-                evidence_id="adv_biz_clear",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=entity_name,
-                claim="No business adverse media found",
-                evidence_level=EvidenceClass.SOURCED,
-                disposition=DispositionStatus.CLEAR,
-                confidence=Confidence.HIGH,
+            records.append(self._build_clear_record(
+                "adv_biz_clear", entity_name,
+                "No business adverse media found",
             ))
 
         amr = AdverseMediaResult(
@@ -108,5 +92,5 @@ Run ALL mandatory searches and classify findings by severity."""
             categories=data.get("categories", []),
             evidence_records=records,
         )
-        amr.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        self._attach_search_queries(amr, result)
         return amr

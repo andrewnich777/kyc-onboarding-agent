@@ -3,7 +3,7 @@ Jurisdiction Risk Assessment Agent.
 Shared agent for FATF status, OFAC programs, FINTRAC directives, CRS participation.
 """
 
-from agents.base import BaseAgent, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_REGULATORY_CONTEXT
+from agents.base import BaseAgent, _safe_parse_enum, KYC_EVIDENCE_RULES, KYC_OUTPUT_RULES, KYC_REGULATORY_CONTEXT
 from models import JurisdictionRiskResult, RiskLevel, EvidenceRecord, EvidenceClass, DispositionStatus, Confidence
 from logger import get_logger
 
@@ -82,46 +82,27 @@ Provide an overall jurisdiction risk level."""
         if not data:
             return JurisdictionRiskResult(jurisdictions_assessed=jurisdictions)
 
-        level = RiskLevel.LOW
-        try:
-            level = RiskLevel(data.get("overall_jurisdiction_risk", "LOW").upper())
-        except ValueError:
-            pass
+        level = _safe_parse_enum(RiskLevel, data.get("overall_jurisdiction_risk", "LOW"), RiskLevel.LOW)
 
         records = []
         for country in data.get("fatf_grey_list", []):
-            records.append(EvidenceRecord(
-                evidence_id=f"jur_grey_{country[:3].lower()}",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=country,
-                claim=f"{country} is on FATF grey list (increased monitoring)",
-                evidence_level=EvidenceClass.SOURCED,
-                disposition=DispositionStatus.PENDING_REVIEW,
+            records.append(self._build_finding_record(
+                f"jur_grey_{country[:3].lower()}", country,
+                f"{country} is on FATF grey list (increased monitoring)",
                 confidence=Confidence.HIGH,
             ))
         for country in data.get("fatf_black_list", []):
-            records.append(EvidenceRecord(
-                evidence_id=f"jur_black_{country[:3].lower()}",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=country,
-                claim=f"{country} is on FATF black list (call for action)",
+            records.append(self._build_finding_record(
+                f"jur_black_{country[:3].lower()}", country,
+                f"{country} is on FATF black list (call for action)",
                 evidence_level=EvidenceClass.VERIFIED,
-                disposition=DispositionStatus.PENDING_REVIEW,
                 confidence=Confidence.HIGH,
             ))
 
         if not records:
-            records.append(EvidenceRecord(
-                evidence_id="jur_clear",
-                source_type="agent",
-                source_name=self.name,
-                entity_screened=", ".join(jurisdictions),
-                claim="All jurisdictions assessed as standard risk",
-                evidence_level=EvidenceClass.SOURCED,
-                disposition=DispositionStatus.CLEAR,
-                confidence=Confidence.HIGH,
+            records.append(self._build_clear_record(
+                "jur_clear", ", ".join(jurisdictions),
+                "All jurisdictions assessed as standard risk",
             ))
 
         # Build jurisdiction_details from agent response or fallback from FATF lists
@@ -150,5 +131,5 @@ Provide an overall jurisdiction risk level."""
             jurisdiction_details=jurisdiction_details,
             evidence_records=records,
         )
-        jr.search_queries_executed = result.get("search_stats", {}).get("search_queries", [])
+        self._attach_search_queries(jr, result)
         return jr

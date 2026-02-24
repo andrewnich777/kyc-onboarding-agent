@@ -6,6 +6,8 @@ Quantitative risk breakdown for Fraud & Risk team.
 from datetime import datetime
 from typing import Optional
 
+from generators.ubo_helpers import extract_ubo_field as _ubo_field
+
 
 def generate_risk_assessment_brief(
     client_id: str,
@@ -231,14 +233,3 @@ def generate_risk_assessment_brief(
     return "\n".join(lines)
 
 
-def _ubo_field(ubo_data: dict, screening_type: str, field: str, default: str = "Pending") -> str:
-    """Extract human-readable status from UBO data."""
-    if not ubo_data:
-        return default
-    result = ubo_data.get(screening_type)
-    if not result or not isinstance(result, dict):
-        return default
-    value = result.get(field, default)
-    if value in ("CLEAR", "NOT_PEP"):
-        return "Clear"
-    return str(value).replace("_", " ").title()
