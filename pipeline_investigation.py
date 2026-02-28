@@ -5,8 +5,10 @@ Handles Stage 2: AI agent execution, UBO cascade, and utility dispatch.
 """
 
 import importlib
+import time
 
 from logger import get_logger
+from pipeline_metrics import AgentMetric
 from models import (
     BusinessClient, InvestigationPlan, InvestigationResults,
 )
@@ -22,13 +24,21 @@ class InvestigationMixin:
         """Stage 2: Run AI agents and deterministic utilities."""
         results = InvestigationResults()
 
+        # Initialize agent metrics list (consumed by pipeline.py for dashboard)
+        if not hasattr(self, '_agent_metrics'):
+            self._agent_metrics = []
+
         # Run AI agents sequentially (no rate limit pauses — Claude Max)
         for agent_name in plan.agents_to_run:
             self.log(f"  Running {agent_name}...")
             try:
+                t0 = time.time()
                 result = await self._run_agent(agent_name, client, plan)
+                duration = time.time() - t0
+
                 self._store_agent_result(results, agent_name, result)
-                self.log(f"  [green]{agent_name} complete[/green]")
+                self._capture_agent_metric(agent_name, duration)
+                self.log(f"  [green]{agent_name} complete ({duration:.1f}s)[/green]")
             except Exception as e:
                 self.log(f"  [red]{agent_name} error: {e}[/red]")
                 logger.exception(f"Agent {agent_name} failed")
@@ -38,8 +48,11 @@ class InvestigationMixin:
             self.log(f"\n  [bold cyan]UBO Cascade ({len(plan.ubo_names)} owners)[/bold cyan]")
             for ubo in client.beneficial_owners:
                 self.log(f"  Screening UBO: {ubo.full_name} ({ubo.ownership_percentage}%)")
+                t0 = time.time()
                 ubo_results = await self._screen_ubo(ubo)
+                duration = time.time() - t0
                 results.ubo_screening[ubo.full_name] = ubo_results
+                self._capture_ubo_metrics(ubo.full_name, duration)
 
         # Run deterministic utilities (pass partial results for EDD/compliance)
         self.log(f"\n  [bold cyan]Deterministic Utilities[/bold cyan]")
@@ -149,3 +162,55 @@ class InvestigationMixin:
         if isinstance(result, dict):
             evidence = result.get("evidence_records") or result.get("evidence") or []
             self.evidence_store.extend(evidence)
+
+    def _capture_agent_metric(self, agent_name: str, duration: float):
+        """Capture metrics from the agent that just ran."""
+        # Map agent names to their attribute names on self
+        agent_attr_map = {
+            name: attr for name, (attr, _) in AGENT_DISPATCH.items()
+        }
+        attr = agent_attr_map.get(agent_name)
+        if not attr:
+            return
+
+        agent = getattr(self, attr, None)
+        if not agent:
+            return
+
+        usage = getattr(agent, '_last_usage', {})
+        stats = getattr(agent, 'search_stats', {})
+        metric = AgentMetric(
+            name=agent_name,
+            model=agent.model,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            web_searches=stats.get("web_search_count", 0),
+            web_fetches=stats.get("web_fetch_count", 0),
+            duration_seconds=duration,
+        )
+        self._agent_metrics.append(metric)
+
+    def _capture_ubo_metrics(self, ubo_name: str, duration: float):
+        """Capture metrics for UBO cascade agents after screening a single UBO."""
+        for agent_label, agent_attr in [
+            ("UBO-Sanctions", "individual_sanctions_agent"),
+            ("UBO-PEP", "pep_detection_agent"),
+            ("UBO-AdverseMedia", "individual_adverse_media_agent"),
+        ]:
+            agent = getattr(self, agent_attr, None)
+            if not agent:
+                continue
+            usage = getattr(agent, '_last_usage', {})
+            stats = getattr(agent, 'search_stats', {})
+            if usage.get("input_tokens", 0) == 0:
+                continue  # Agent wasn't used for this UBO
+            metric = AgentMetric(
+                name=f"{agent_label}({ubo_name[:20]})",
+                model=agent.model,
+                input_tokens=usage.get("input_tokens", 0),
+                output_tokens=usage.get("output_tokens", 0),
+                web_searches=stats.get("web_search_count", 0),
+                web_fetches=stats.get("web_fetch_count", 0),
+                duration_seconds=duration / 3,  # Approximate per-agent split
+            )
+            self._agent_metrics.append(metric)

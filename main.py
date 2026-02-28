@@ -41,8 +41,9 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    %(prog)s --client test_cases/case1_individual_low.json
-    %(prog)s --client test_cases/case2_individual_pep.json --output ./results
+    %(prog)s --demo                                         # Demo mode (Case 3, interactive)
+    %(prog)s --client test_cases/case1_individual_low.json  # Interactive review
+    %(prog)s --client test_cases/case2_individual_pep.json --non-interactive
     %(prog)s --client test_cases/case3_business_critical.json --resume
     %(prog)s --finalize results/northern_maple_trading_corp
 
@@ -104,7 +105,52 @@ Output structure:
         help="Finalize a paused review session. Pass the results directory path."
     )
 
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Skip interactive review (pause and finalize separately, original behavior)"
+    )
+
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Demo mode: auto-loads Case 3 with narrator panels explaining each stage"
+    )
+
     return parser
+
+
+DEMO_NARRATION = {
+    "stage1": (
+        "Stage 1: Intake & Classification",
+        "Deterministic risk scoring detected CRITICAL risk: Russia operations, "
+        "US nexus via Oregon warehouse, 3 UBOs including a 51% Russian-citizen owner.\n"
+        "The system identified applicable regulations (FINTRAC, CIRO, OFAC, FATCA, CRS) "
+        "and planned 7 AI agents + 3 UBO cascades.",
+    ),
+    "complete": (
+        "Pipeline Complete",
+        "AI agents screened across 5 jurisdictions. Opus cross-referenced all evidence, "
+        "surfaced contradictions, and generated counter-arguments for each disposition.\n"
+        "Review Intelligence graded evidence quality and mapped findings to regulatory obligations.\n"
+        "A human analyst would spend 4-6 hours on this case. The system completed it in minutes, "
+        "with full evidence traceability and an auditable review session.",
+    ),
+}
+
+
+def _demo_narrator(stage_key: str):
+    """Display a demo narrator panel between stages."""
+    if stage_key not in DEMO_NARRATION:
+        return
+    title, body = DEMO_NARRATION[stage_key]
+    console.print(Panel(
+        body,
+        title=f"[bold magenta]{title}[/bold magenta]",
+        border_style="magenta",
+        padding=(1, 2),
+    ))
+    console.print()
 
 
 def display_summary(output):
@@ -206,30 +252,56 @@ async def main_async(args: argparse.Namespace) -> int:
         ))
 
     try:
+        interactive = not args.non_interactive
+
         pipeline = KYCPipeline(
             output_dir=args.output,
             verbose=verbose,
-            resume=args.resume
+            resume=args.resume,
+            interactive=interactive,
         )
 
         if args.finalize:
             # Finalize a paused review session
             result = await pipeline.finalize(args.finalize)
-        elif args.client:
-            # Load client data
-            client_path = Path(args.client)
-            if not client_path.exists():
-                console.print(f"[bold red]Error:[/bold red] Client file not found: {args.client}")
-                return 1
+        elif args.demo or args.client:
+            # Demo mode: auto-load Case 3
+            if args.demo:
+                demo_path = Path(__file__).parent / "test_cases" / "case3_business_critical.json"
+                if not demo_path.exists():
+                    console.print(f"[bold red]Error:[/bold red] Demo case not found: {demo_path}")
+                    return 1
+                client_data = json.loads(demo_path.read_text(encoding="utf-8"))
+                console.print(Panel(
+                    "[bold]Demo Mode[/bold]: Running Case 3 — Northern Maple Trading Corp\n"
+                    "CRITICAL risk: Russia trade corridor, US nexus, 3 UBOs including 51% Russian owner\n\n"
+                    "[dim]This demonstrates the full 5-stage pipeline with interactive review.[/dim]",
+                    title="KYC Demo",
+                    border_style="magenta",
+                ))
+            else:
+                # Load client data
+                client_path = Path(args.client)
+                if not client_path.exists():
+                    console.print(f"[bold red]Error:[/bold red] Client file not found: {args.client}")
+                    return 1
+                client_data = json.loads(client_path.read_text(encoding="utf-8"))
 
-            client_data = json.loads(client_path.read_text(encoding="utf-8"))
             if verbose:
                 client_name = client_data.get("full_name") or client_data.get("legal_name", "Unknown")
                 console.print(f"\nProcessing: [bold]{client_name}[/bold]\n")
 
+            # Demo narrator: Stage 1
+            if args.demo:
+                _demo_narrator("stage1")
+
             result = await pipeline.run(client_data)
+
+            # Demo narrator: completion
+            if args.demo:
+                _demo_narrator("complete")
         else:
-            console.print("[bold red]Error:[/bold red] Provide --client or --finalize argument.")
+            console.print("[bold red]Error:[/bold red] Provide --client, --demo, or --finalize argument.")
             return 1
 
         if verbose:

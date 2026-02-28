@@ -1,190 +1,160 @@
 # KYC Client Onboarding Intelligence System
 
-An AI-powered regulatory screening and risk assessment pipeline for financial client onboarding, designed for the Canadian securities dealer context (FINTRAC/CIRO). Built as a practical demonstration of multi-agent AI systems applied to compliance workflows.
+**What can a compliance officer now do that they couldn't before?**
 
-**Design Principles:**
-1. **AI investigates. Rules classify. Humans decide.** — AI agents gather evidence; deterministic utilities score risk; compliance officers make final decisions.
-2. **Individual and business are separate paths through the same pipeline.** — Client type determines which agents run and which utilities apply.
-3. **The conversational review IS the terminal.** — After generating proto-reports, the system pauses for the compliance officer to ask questions, approve/override dispositions, then finalize.
+A single command screens a client across sanctions lists, PEP databases, adverse media, corporate registries, and jurisdiction risk — across every beneficial owner — in minutes instead of hours. The officer gets an evidence-linked risk profile, counter-arguments against every disposition, and an interactive review session where they can interrogate the findings before making a decision.
+
+This is investigative depth at scale. Not automation of existing workflows — expansion of what's possible in a compliance review.
+
+**AI investigates. Rules classify. Humans decide.**
+
+## Quick Start
+
+```bash
+cd fluency-research-agent
+pip install -r requirements.txt
+cp .env.example .env    # Add your ANTHROPIC_API_KEY
+
+# Demo mode — runs the CRITICAL-risk business case with guided narration
+python main.py --demo
+
+# Or run individual cases
+python main.py --client test_cases/case1_individual_low.json
+python main.py --client test_cases/case3_business_critical.json
+```
+
+### What Happens
+
+1. **Intake** classifies risk and plans the investigation (deterministic)
+2. **Investigation** runs 7 AI agents + UBO cascades across 5 jurisdictions
+3. **Synthesis** (Opus) cross-references 40+ evidence records, surfaces contradictions
+4. **Review** — the officer asks questions, approves dispositions, decides
+5. **Reports** — 4 department briefs + PDFs from a single investigation pass
+
+```
+[review] > Why is Viktor Petrov flagged?
+┌─ Review Assistant ────────────────────────────┐
+│ Viktor Petrov [EV_012] triggered a POTENTIAL   │
+│ MATCH against OFAC SDN list entry for Viktor   │
+│ Petrov (DOB mismatch: 1972 vs 1968). The 51%  │
+│ ownership stake triggers the OFAC 50% rule...  │
+└────────────────────────────────────────────────┘
+[review] > decide dp_1 B
+  Decision recorded: Sanctions Disposition: Alexander Petrov
+    Selected: [B] ESCALATE — Refer to senior compliance for review
+[review] > finalize
+```
+
+### Pipeline Metrics (Sample Case 3 Run)
+
+| Metric | Value |
+|--------|-------|
+| Total time | ~90s |
+| Agents | 7 + 3 UBO cascades |
+| Total tokens | ~50K |
+| Estimated cost | ~$0.45 |
+| Evidence grade | B |
+| Web searches | ~30 |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    5-Stage Pipeline                   │
-├──────────┬──────────┬──────────┬──────────┬──────────┤
-│ Stage 1  │ Stage 2  │ Stage 3  │ Stage 4  │ Stage 5  │
-│ Intake & │ Investi- │ Synthe-  │ Review   │ Final    │
-│ Classify │ gation   │ sis      │ (Human)  │ Reports  │
-├──────────┼──────────┼──────────┼──────────┼──────────┤
-│Determin- │AI Agents │Opus AI   │Terminal  │Generators│
-│istic     │+Utilities│          │Chat      │+ PDF     │
-└──────────┴──────────┴──────────┴──────────┴──────────┘
+Stage 1          Stage 2           Stage 3          Stage 4        Stage 5
+Intake &    -->  Investigation -->  Synthesis   -->  Interactive -> Final
+Classification   (AI + Rules)      (Opus AI)        Review         Reports
+                                                    (Human)
+deterministic    7 agents +        cross-ref        ask questions  4 briefs
+risk scoring     UBO cascades      contradict       decide         + PDFs
+reg detection    12 utilities      counter-args     approve
 ```
 
-### Stage 1: Intake & Classification (Deterministic)
-- Parses client JSON (individual or business)
-- Calculates preliminary risk score using point-based tables
-- Detects applicable regulations (FINTRAC, CIRO, OFAC, FATCA, CRS)
-- Builds investigation plan (which agents and utilities to run)
+### Stage 2: Investigation Agents
 
-### Stage 2: Investigation (AI + Deterministic)
-**AI Agents** (Sonnet 4.6 — web search + screening tools):
-| Agent | Individual | Business | Description |
+| Agent | Individual | Business | What It Does |
 |-------|-----------|----------|-------------|
-| IndividualSanctions | ✓ | UBO cascade | CSL, OpenSanctions, Canadian/UN lists |
-| PEPDetection | ✓ | UBO cascade | FINTRAC PEP classification |
-| IndividualAdverseMedia | ✓ | UBO cascade | Negative news, CanLII |
-| EntityVerification | | ✓ | Corporate registry, UBO structure |
-| EntitySanctions | | ✓ | Entity screening + OFAC 50% rule |
-| BusinessAdverseMedia | | ✓ | Trade compliance, regulatory actions |
-| JurisdictionRisk | ✓ | ✓ | FATF grey/black, OFAC programs |
+| IndividualSanctions | Y | UBO cascade | CSL, OpenSanctions, Canadian/UN lists |
+| PEPDetection | Y | UBO cascade | FINTRAC PEP classification (5 levels) |
+| IndividualAdverseMedia | Y | UBO cascade | Negative news, CanLII legal databases |
+| EntityVerification | | Y | Corporate registry, UBO structure |
+| EntitySanctions | | Y | Entity screening + OFAC 50% rule |
+| BusinessAdverseMedia | | Y | Trade compliance, regulatory actions |
+| JurisdictionRisk | Y | Y | FATF grey/black, OFAC sanctions programs |
 
-**Deterministic Utilities** (pure Python, no API calls):
-| Utility | Individual | Business | Description |
-|---------|-----------|----------|-------------|
-| id_verification | ✓ | ✓ | FINTRAC ID verification pathway |
-| suitability | ✓ | ✓ | CIRO 3202 suitability assessment |
-| individual_fatca_crs | ✓ | | 7 US indicia, CRS self-certification |
-| entity_fatca_crs | | ✓ | FI/Active NFFE/Passive NFFE classification |
-| edd_requirements | ✓ | ✓ | EDD trigger logic and measures |
-| compliance_actions | ✓ | ✓ | STR, TPR, FATCA/CRS reporting |
-| business_risk_assessment | | ✓ | Industry, ownership, transaction analysis |
+Plus 12 deterministic utilities: ID verification, suitability (CIRO 3202), FATCA/CRS, EDD triggers, compliance actions, business risk assessment, document requirements.
 
-**UBO Cascade** (business clients only): Each beneficial owner is individually screened through IndividualSanctions, PEPDetection, and IndividualAdverseMedia. Results feed back into risk score revision.
+### Evidence Classification (V/S/I/U)
 
-### Stage 3: Synthesis (Opus 4.6)
-- Cross-references all findings across agents and utilities
-- Detects contradictions and corroborations
-- Revises risk score with UBO cascade data + synthesis-discovered factors
-- Recommends APPROVE / CONDITIONAL / ESCALATE / DECLINE
-- Generates proto-reports for review
+Every finding is tagged with an evidence level — this is what makes AI confidence legible to humans:
 
-### Stage 4: Review (Human-in-the-Loop)
-The pipeline pauses after Stage 3. The compliance officer continues in the terminal:
-- "Explain the Petrov sanctions match"
-- "Approve the false positive"
-- "Finalize"
-
-Actions are logged to `review_session.json`.
-
-### Stage 5: Final Reports
-- Compliance Officer Brief (detailed Markdown + PDF)
-- Onboarding Summary (one-page decision document + PDF)
-- Incorporates review session log and any disposition overrides
-
-## Risk Scoring
-
-Two-pass point-based scoring:
-
-| Score Range | Risk Level |
-|-------------|-----------|
-| 0-15 | LOW |
-| 16-35 | MEDIUM |
-| 36-60 | HIGH |
-| 61+ | CRITICAL |
-
-**Individual factors:** PEP status (+25/+30/+40), citizenship, country of birth, occupation, source of funds, wealth/income ratio, US person, tax residencies, third-party transactions.
-
-**Business factors:** Entity age, industry, countries of operation (FATF/sanctions), transaction volume, ownership complexity, US nexus, incorporation jurisdiction, UBO cascade (`max(ubo_scores) × 0.5`).
-
-## Evidence Classification (V/S/I/U)
-
-Every finding is tagged with an evidence level:
-- **V (Verified)** — URL + direct quote + Tier 0/1 source (government registry, official list)
-- **S (Sourced)** — URL + excerpt + Tier 1/2 source (major news, regulatory database)
-- **I (Inferred)** — Derived from signals, no direct evidence
+- **V (Verified)** — URL + direct quote from government registry or official list
+- **S (Sourced)** — URL + excerpt from major news or regulatory database
+- **I (Inferred)** — Derived from multiple signals, reasoning chain documented
 - **U (Unknown)** — Explicitly searched but not found
 
-## Quick Start
+Evidence quality is auto-graded (A-F). Grade A requires 60%+ Verified/Sourced. Low grades trigger extended review time and follow-up actions.
 
-### Prerequisites
-- Python 3.10+
-- Anthropic API key (Claude Max or API access)
+### Model Routing
 
-### Setup
+| Component | Model | Rationale |
+|-----------|-------|-----------|
+| 7 research agents | Sonnet 4.6 | Fast, cost-effective search + analysis |
+| Synthesis | Opus 4.6 | Complex cross-referencing and reasoning |
+| Review assistant | Opus 4.6 | Nuanced compliance Q&A with evidence |
+
+### Risk Scoring
+
+Two-pass point-based scoring (deterministic):
+
+| Score | Level | Action |
+|-------|-------|--------|
+| 0-15 | LOW | Standard onboarding |
+| 16-35 | MEDIUM | Enhanced monitoring |
+| 36-60 | HIGH | Senior review required |
+| 61+ | CRITICAL | Senior management + EDD |
+
+## Test Cases
+
+| Case | Client | Risk | Key Features |
+|------|--------|------|-------------|
+| 1 | Sarah Thompson | LOW | Canadian nurse, clean profile — fast path |
+| 2 | Maria Chen-Dubois | HIGH | Domestic PEP, Hong Kong birth, dual tax residency |
+| 3 | Northern Maple Trading | CRITICAL | Import/export, Russia corridor, 3 UBOs, OFAC 50% rule |
+
 ```bash
-cd kyc-onboarding-agent
-pip install -r requirements.txt
-cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
-```
-
-### Run
-```bash
-# Individual client (LOW risk)
-python main.py --client test_cases/case1_individual_low.json
-
-# Individual with PEP (HIGH risk)
-python main.py --client test_cases/case2_individual_pep.json
-
-# Business with UBO cascade (CRITICAL risk)
-python main.py --client test_cases/case3_business_critical.json
-
-# Resume from checkpoint
-python main.py --client test_cases/case1_individual_low.json --resume
-
-# Finalize after review
-python main.py --finalize results/sarah_thompson_20260223
-```
-
-### Test Cases
-
-| Case | Client | Type | Expected Risk | Key Features |
-|------|--------|------|--------------|--------------|
-| 1 | Sarah Thompson | Individual | LOW | Canadian nurse, clean profile |
-| 2 | Maria Chen-Dubois | Individual | HIGH | Domestic PEP, Hong Kong birth, dual tax |
-| 3 | Northern Maple Trading | Business | CRITICAL | Import/export, Russia trade corridor, UBO cascade, OFAC 50% rule |
-
-### Run Tests
-```bash
+# Run all tests
 pytest tests/ -v
+
+# Non-interactive mode (original pause + finalize behavior)
+python main.py --client test_cases/case1_individual_low.json --non-interactive
+python main.py --finalize results/sarah_thompson_20260228
 ```
 
 ## Results Directory
 
 ```
 results/{client_id}/
+  pipeline_metrics.json      # Timing, tokens, cost, evidence grade
   checkpoint.json
-  01_intake/
-    classification.json
-    investigation_plan.json
-  02_investigation/
-    evidence_store.json
-    individual_sanctions.json | entity_sanctions.json
-    pep_analysis.json         | entity_verification.json
-    ...
-    ubo_screening/            # Business only
-  03_synthesis/
-    evidence_graph.json
-    risk_assessment.json
-    proto_compliance_brief.md
-    proto_onboarding_summary.md
-  04_review/
-    review_session.json
-  05_output/
-    compliance_officer_brief.md + .pdf
-    onboarding_summary.md + .pdf
+  01_intake/                 # Risk classification + investigation plan
+  02_investigation/          # Evidence store + screening results
+  03_synthesis/              # Evidence graph + proto-reports + review intelligence
+  04_review/                 # Review session log (queries, decisions, notes)
+  05_output/                 # Final briefs (MD + PDF)
 ```
 
-## Model Routing
+## Design Decisions
 
-| Component | Model | Rationale |
-|-----------|-------|-----------|
-| Research agents (7) | Sonnet 4.6 | Fast, cost-effective for search + analysis |
-| Synthesis | Opus 4.6 | Complex cross-referencing and reasoning |
-| Review session | Opus 4.6 | Nuanced compliance Q&A |
-
-## Data Sources
-- **Trade.gov Consolidated Screening List** — US sanctions, denied persons, entity lists
-- **Web search** — OpenSanctions, Canadian sanctions lists, UN lists, CanLII, corporate registries, news
-- **FATF** — Grey list and black list countries
-- **FINTRAC** — PEP definitions, EDD triggers, reporting obligations
-- **CIRO** — Rule 3202 suitability requirements
+See [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md) for:
+- What breaks at scale (the review queue, not the AI)
+- Why AI must stop at disposition (accountability, incomplete world models)
+- Evidence classification as core architecture
+- Graceful degradation strategies
 
 ## Tech Stack
+
 - Python 3.10+ with Pydantic v2
 - Anthropic Claude API (Opus 4.6 + Sonnet 4.6)
+- Rich for terminal UI and interactive review
 - fpdf2 for PDF generation
-- Rich for terminal UI
 - rapidfuzz for sanctions list fuzzy matching
+- Trade.gov CSL API for sanctions screening

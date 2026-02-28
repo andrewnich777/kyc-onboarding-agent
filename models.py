@@ -550,5 +550,6 @@ class KYCOutput(BaseModel):
     risk_assessment_brief: str = ""
     regulatory_actions_brief: str = ""
     onboarding_decision_brief: str = ""
+    metrics: Optional[dict] = Field(default=None, description="Pipeline metrics (timing, tokens, cost)")
     generated_at: datetime = Field(default_factory=datetime.now)
     duration_seconds: float = 0.0

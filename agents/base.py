@@ -130,6 +130,9 @@ class BaseAgent(ABC):
         # Search context from pipeline (to avoid duplicate queries)
         self._search_context = ""
 
+        # Token usage from last API call (preserved for pipeline metrics)
+        self._last_usage = {"input_tokens": 0, "output_tokens": 0}
+
     @property
     def model(self) -> str:
         """Get the model for this agent - uses routing based on agent name."""
@@ -402,6 +405,12 @@ class BaseAgent(ABC):
 
     def _extract_response(self, response: anthropic.types.Message, messages: list) -> dict:
         """Extract the final text response and any JSON data."""
+        # Preserve cumulative token usage for pipeline metrics
+        self._last_usage = {
+            "input_tokens": self._last_usage["input_tokens"] + response.usage.input_tokens,
+            "output_tokens": self._last_usage["output_tokens"] + response.usage.output_tokens,
+        }
+
         text_content = ""
         for block in response.content:
             if hasattr(block, "text"):

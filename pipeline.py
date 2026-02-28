@@ -10,6 +10,7 @@ Runs the 5-stage KYC pipeline:
 """
 
 import json
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -18,6 +19,7 @@ from rich.console import Console
 
 from logger import get_logger
 from config import get_config
+from pipeline_metrics import PipelineMetrics, StageMetric, AgentMetric, display_metrics, save_metrics
 
 logger = get_logger(__name__)
 
@@ -38,18 +40,21 @@ from pipeline_checkpoint import CheckpointMixin
 from pipeline_investigation import InvestigationMixin
 from pipeline_synthesis import SynthesisMixin
 from pipeline_reports import ReportsMixin
+from pipeline_review import ReviewMixin
 
 
 console = Console(force_terminal=True, legacy_windows=True)
 
 
-class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMixin):
+class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMixin, ReviewMixin):
     """Orchestrates the full KYC pipeline for client onboarding."""
 
-    def __init__(self, output_dir: str = "results", verbose: bool = True, resume: bool = False):
+    def __init__(self, output_dir: str = "results", verbose: bool = True, resume: bool = False,
+                 interactive: bool = True):
         self.output_dir = Path(output_dir)
         self.verbose = verbose
         self.resume = resume
+        self.interactive = interactive
         self.checkpoint = {}
         self.checkpoint_path = None
 
@@ -86,8 +91,13 @@ class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMi
         else:
             client = BusinessClient(**client_data)
 
+        # Initialize stage timing
+        self._stage_timings: list[StageMetric] = []
+        self._agent_metrics: list[AgentMetric] = []
+
         # Stage 1: Intake & Classification
         self.log("\n[bold blue]Stage 1: Intake & Classification[/bold blue]")
+        t_stage = time.time()
         plan = await self._run_intake(client)
         client_id = plan.client_id
 
@@ -111,7 +121,10 @@ class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMi
         if plan.ubo_cascade_needed:
             self.log(f"  UBO Cascade: {', '.join(plan.ubo_names)}")
 
+        self._stage_timings.append(StageMetric("1. Intake & Classification", time.time() - t_stage))
+
         # Stage 2: Investigation
+        t_stage = time.time()
         if completed_stage < 2:
             self.log("\n[bold blue]Stage 2: Investigation[/bold blue]")
             investigation = await self._run_investigation(client, plan)
@@ -124,8 +137,10 @@ class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMi
 
         # Save evidence store
         self._save_evidence_store(client_id)
+        self._stage_timings.append(StageMetric("2. Investigation", time.time() - t_stage))
 
         # Stage 3: Synthesis
+        t_stage = time.time()
         if completed_stage < 3:
             self.log("\n[bold blue]Stage 3: Synthesis & Proto-Reports[/bold blue]")
             synthesis = await self._run_synthesis(client, plan, investigation)
@@ -161,18 +176,67 @@ class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMi
         # Save Stage 3 outputs (with review intelligence for proto-briefs)
         self._save_stage3_outputs(client_id, synthesis, plan, review_intelligence=review_intel)
 
+        self._stage_timings.append(StageMetric("3. Synthesis & Review Intel", time.time() - t_stage))
+
         # Display review intelligence, THEN decision points
         self._display_review_intelligence(review_intel)
         self._display_decision_points(synthesis)
 
-        # Stage 4: Pause for Review
-        self.log("\n[bold yellow]Stage 4: Review[/bold yellow]")
-        self.log("  Proto-reports generated. Review and ask questions.")
-        self.log(f"  To finalize: python main.py --finalize results/{client_id}")
+        # Stage 4: Review
+        t_stage = time.time()
+        if self.interactive:
+            # Interactive review loop — officer asks questions, approves dispositions
+            review_session = await self._run_interactive_review(
+                client_id, synthesis, plan, review_intel, self.evidence_store,
+            )
 
-        # Initialize review session
-        review_session = ReviewSession(client_id=client_id)
-        self._save_review_session(client_id, review_session)
+            # Stage 5: Final Reports (runs immediately after finalize)
+            if review_session.finalized:
+                self.log("\n[bold blue]Stage 5: Final Reports[/bold blue]")
+                await self._run_final_reports(
+                    client_id, synthesis, plan, review_session, investigation,
+                    review_intelligence=review_intel,
+                )
+                self._save_review_session(client_id, review_session)
+        else:
+            # Non-interactive: pause for review (original behavior)
+            self.log("\n[bold yellow]Stage 4: Review[/bold yellow]")
+            self.log("  Proto-reports generated. Review and ask questions.")
+            self.log(f"  To finalize: python main.py --finalize results/{client_id}")
+            review_session = ReviewSession(client_id=client_id)
+            self._save_review_session(client_id, review_session)
+
+        self._stage_timings.append(StageMetric("4. Review" + (" + 5. Reports" if (self.interactive and review_session.finalized) else ""), time.time() - t_stage))
+
+        # Capture synthesis agent metrics
+        synth_usage = getattr(self.synthesis_agent, '_last_usage', {})
+        if synth_usage.get("input_tokens", 0) > 0:
+            self._agent_metrics.append(AgentMetric(
+                name="KYCSynthesis",
+                model=self.synthesis_agent.model,
+                input_tokens=synth_usage.get("input_tokens", 0),
+                output_tokens=synth_usage.get("output_tokens", 0),
+            ))
+
+        # Build and display pipeline metrics
+        metrics = PipelineMetrics(
+            stages=self._stage_timings,
+            agents=self._agent_metrics,
+        )
+
+        # Populate evidence quality from review intelligence
+        if review_intel and review_intel.confidence:
+            conf = review_intel.confidence
+            metrics.evidence_grade = conf.overall_confidence_grade
+            metrics.evidence_total = len(self.evidence_store)
+            total = metrics.evidence_total or 1
+            metrics.evidence_verified = round(conf.verified_pct * total / 100)
+            metrics.evidence_sourced = round(conf.sourced_pct * total / 100)
+            metrics.evidence_inferred = round(conf.inferred_pct * total / 100)
+            metrics.evidence_unknown = round(conf.unknown_pct * total / 100)
+
+        display_metrics(metrics, console)
+        save_metrics(metrics, self.output_dir, client_id)
 
         # Calculate duration
         duration = (datetime.now() - start_time).total_seconds()
@@ -188,6 +252,7 @@ class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMi
             review_intelligence=review_intel,
             review_session=review_session,
             final_decision=synthesis.recommended_decision if synthesis else None,
+            metrics=metrics.to_dict(),
             generated_at=datetime.now(),
             duration_seconds=duration,
         )
