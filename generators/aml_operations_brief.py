@@ -17,6 +17,7 @@ def generate_aml_operations_brief(
     evidence_store: list = None,
     review_session=None,
     investigation=None,
+    review_intelligence=None,
 ) -> str:
     """Generate a detailed AML operations brief in Markdown."""
     lines = []
@@ -40,7 +41,73 @@ def generate_aml_operations_brief(
     lines.append("")
 
     # =========================================================================
-    # 2. Sanctions Screening
+    # 2. Review Intelligence Summary
+    # =========================================================================
+    if review_intelligence:
+        lines.append("## Review Intelligence Summary")
+        lines.append("")
+
+        # Investigation Quality
+        conf = review_intelligence.confidence
+        lines.append("### Investigation Quality")
+        lines.append(f"- **Confidence Grade:** {conf.overall_confidence_grade}")
+        lines.append(f"- **Verified [V]:** {conf.verified_pct:.1f}%")
+        lines.append(f"- **Sourced [S]:** {conf.sourced_pct:.1f}%")
+        lines.append(f"- **Inferred [I]:** {conf.inferred_pct:.1f}%")
+        lines.append(f"- **Unknown [U]:** {conf.unknown_pct:.1f}%")
+        if conf.degraded:
+            lines.append("")
+            lines.append("**DEGRADED — Follow-up actions required:**")
+            for action in conf.follow_up_actions:
+                lines.append(f"- {action}")
+        lines.append("")
+
+        # Contradictions
+        if review_intelligence.contradictions:
+            lines.append("### Contradictions Detected")
+            lines.append("")
+            lines.append("| Severity | Agent A | Finding A | Agent B | Finding B | Guidance |")
+            lines.append("|----------|---------|-----------|---------|-----------|----------|")
+            for c in review_intelligence.contradictions:
+                lines.append(f"| **{c.severity.value}** | {c.agent_a} | {c.finding_a[:40]} | "
+                             f"{c.agent_b} | {c.finding_b[:40]} | {c.resolution_guidance[:50]} |")
+            lines.append("")
+
+        # Critical Discussion Points
+        if review_intelligence.discussion_points:
+            lines.append("### Critical Discussion Points")
+            lines.append("")
+            lines.append("| Severity | Finding | Recommended Action |")
+            lines.append("|----------|---------|-------------------|")
+            for dp in review_intelligence.discussion_points:
+                lines.append(f"| **{dp.severity.value}** | {dp.title[:50]} | {dp.recommended_action[:50]} |")
+            lines.append("")
+
+        # Per-Finding Regulatory Obligations
+        if review_intelligence.regulatory_mappings:
+            lines.append("### Per-Finding Regulatory Obligations")
+            lines.append("")
+            lines.append("| Finding | Regulation | Obligation | Timeline |")
+            lines.append("|---------|-----------|------------|----------|")
+            for fm in review_intelligence.regulatory_mappings:
+                for tag in fm.regulatory_tags:
+                    lines.append(f"| {fm.claim[:35]} | {tag.regulation} | {tag.obligation[:40]} | {tag.timeline} |")
+            lines.append("")
+
+        # Cross-Case Patterns
+        if review_intelligence.batch_analytics.patterns:
+            lines.append("### Cross-Case Patterns")
+            lines.append("")
+            lines.append(f"*{review_intelligence.batch_analytics.total_cases_in_window} cases in analysis window*")
+            lines.append("")
+            lines.append("| Pattern | Count | Significance |")
+            lines.append("|---------|-------|-------------|")
+            for p in review_intelligence.batch_analytics.patterns:
+                lines.append(f"| {p.description[:45]} | {p.count} | {p.significance[:45]} |")
+            lines.append("")
+
+    # =========================================================================
+    # 3. Sanctions Screening
     # =========================================================================
     lines.append("## Sanctions Screening")
 

@@ -8,9 +8,11 @@ import json
 from pathlib import Path
 
 from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 from logger import get_logger
-from models import InvestigationResults, ReviewSession
+from models import InvestigationResults, ReviewSession, ReviewIntelligence, SeverityLevel
 
 logger = get_logger(__name__)
 
@@ -25,7 +27,7 @@ BRIEF_GENERATORS = [
         "generators.aml_operations_brief",
         "generate_aml_operations_brief",
         "aml_operations_brief",
-        {"evidence_store", "review_session", "investigation"},
+        {"evidence_store", "review_session", "investigation", "review_intelligence"},
     ),
     (
         "generators.risk_assessment_brief",
@@ -37,13 +39,13 @@ BRIEF_GENERATORS = [
         "generators.regulatory_actions_brief",
         "generate_regulatory_actions_brief",
         "regulatory_actions_brief",
-        {"investigation"},
+        {"investigation", "review_intelligence"},
     ),
     (
         "generators.onboarding_summary",
         "generate_onboarding_summary",
         "onboarding_decision_brief",
-        {"investigation"},
+        {"investigation", "review_intelligence"},
     ),
 ]
 
@@ -62,6 +64,7 @@ class ReportsMixin:
         evidence_store: list = None,
         review_session=None,
         investigation: InvestigationResults = None,
+        review_intelligence: ReviewIntelligence = None,
         generate_pdfs: bool = False,
         risk_level: str = None,
     ):
@@ -76,6 +79,7 @@ class ReportsMixin:
             evidence_store: Evidence records list (for AML brief).
             review_session: ReviewSession (for AML brief, final only).
             investigation: InvestigationResults (for final briefs).
+            review_intelligence: ReviewIntelligence (for enhanced briefs).
             generate_pdfs: Whether to also generate PDFs.
             risk_level: Risk level string for PDF headers.
         """
@@ -91,6 +95,8 @@ class ReportsMixin:
             available_kwargs["review_session"] = review_session
         if investigation is not None:
             available_kwargs["investigation"] = investigation
+        if review_intelligence is not None:
+            available_kwargs["review_intelligence"] = review_intelligence
 
         for module_path, func_name, filename, accepted_extras in BRIEF_GENERATORS:
             try:
@@ -127,7 +133,7 @@ class ReportsMixin:
             except Exception as e:
                 self.log(f"  [yellow]PDF generation skipped: {e}[/yellow]")
 
-    def _save_stage3_outputs(self, client_id: str, synthesis, plan):
+    def _save_stage3_outputs(self, client_id: str, synthesis, plan, review_intelligence=None):
         """Save Stage 3 synthesis outputs and proto-reports."""
         synth_path = self.output_dir / client_id / "03_synthesis"
         synth_path.mkdir(parents=True, exist_ok=True)
@@ -163,10 +169,12 @@ class ReportsMixin:
                 plan=plan,
                 prefix="proto_",
                 evidence_store=self.evidence_store,
+                review_intelligence=review_intelligence,
             )
 
     async def _run_final_reports(self, client_id: str, synthesis, plan, review_session,
-                                investigation: InvestigationResults = None):
+                                investigation: InvestigationResults = None,
+                                review_intelligence: ReviewIntelligence = None):
         """Stage 5: Generate final 4 department-targeted briefs + PDFs."""
         output_dir = self.output_dir / client_id / "05_output"
 
@@ -180,6 +188,16 @@ class ReportsMixin:
         if plan and plan.preliminary_risk:
             risk_level = plan.preliminary_risk.risk_level.value
 
+        # Load review intelligence if not provided
+        if review_intelligence is None:
+            ri_path = self.output_dir / client_id / "03_synthesis" / "review_intelligence.json"
+            if ri_path.exists():
+                try:
+                    ri_data = json.loads(ri_path.read_text(encoding="utf-8"))
+                    review_intelligence = ReviewIntelligence(**ri_data)
+                except Exception as e:
+                    logger.warning(f"Could not load review intelligence: {e}")
+
         self._generate_briefs(
             output_dir=output_dir,
             client_id=client_id,
@@ -188,8 +206,97 @@ class ReportsMixin:
             evidence_store=evidence_store,
             review_session=review_session,
             investigation=investigation,
+            review_intelligence=review_intelligence,
             generate_pdfs=True,
             risk_level=risk_level,
+        )
+
+    # =========================================================================
+    # Review Intelligence Display & I/O
+    # =========================================================================
+
+    def _display_review_intelligence(self, review_intel: ReviewIntelligence):
+        """Display review intelligence findings in the terminal."""
+        if not review_intel:
+            return
+
+        console.print("\n[bold magenta]Review Intelligence[/bold magenta]\n")
+
+        # 1. Confidence degradation banner
+        conf = review_intel.confidence
+        grade_color = {"A": "green", "B": "green", "C": "yellow", "D": "red", "F": "red"}.get(
+            conf.overall_confidence_grade, "white")
+        grade_text = (f"Evidence Quality: Grade {conf.overall_confidence_grade} — "
+                      f"V:{conf.verified_pct:.0f}% S:{conf.sourced_pct:.0f}% "
+                      f"I:{conf.inferred_pct:.0f}% U:{conf.unknown_pct:.0f}%")
+        if conf.degraded:
+            console.print(Panel(
+                f"[bold]{grade_text}[/bold]\n" +
+                "\n".join(f"  - {a}" for a in conf.follow_up_actions),
+                title="CONFIDENCE DEGRADED",
+                border_style="red",
+            ))
+        else:
+            console.print(f"  [{grade_color}]{grade_text}[/{grade_color}]")
+
+        # 2. Contradictions
+        if review_intel.contradictions:
+            console.print(Panel(
+                f"[bold]{len(review_intel.contradictions)} contradiction(s) detected[/bold]",
+                title="CONTRADICTIONS",
+                border_style="red",
+            ))
+            for c in review_intel.contradictions:
+                sev_color = {"CRITICAL": "red", "HIGH": "yellow", "MEDIUM": "cyan"}.get(c.severity.value, "white")
+                console.print(f"  [{sev_color}][{c.severity.value}][/{sev_color}] "
+                              f"{c.agent_a} vs {c.agent_b}")
+                console.print(f"    A: {c.finding_a}")
+                console.print(f"    B: {c.finding_b}")
+                console.print(f"    [dim]{c.resolution_guidance}[/dim]")
+                console.print()
+
+        # 3. Critical discussion points
+        if review_intel.discussion_points:
+            table = Table(title="Discussion Points", show_lines=False)
+            table.add_column("Sev", width=9)
+            table.add_column("Finding", ratio=3)
+            table.add_column("Action", ratio=2)
+
+            for dp in review_intel.discussion_points:
+                sev_color = {"CRITICAL": "red", "HIGH": "yellow", "MEDIUM": "cyan", "ADVISORY": "dim"}.get(
+                    dp.severity.value, "white")
+                table.add_row(
+                    f"[{sev_color}]{dp.severity.value}[/{sev_color}]",
+                    dp.title[:60],
+                    dp.recommended_action[:50],
+                )
+            console.print(table)
+            console.print()
+
+        # 4. Regulatory mappings
+        filing_count = sum(
+            1 for fm in review_intel.regulatory_mappings
+            for tag in fm.regulatory_tags if tag.filing_required
+        )
+        if review_intel.regulatory_mappings:
+            console.print(f"  Regulatory mappings: {len(review_intel.regulatory_mappings)} findings tagged, "
+                          f"{filing_count} filing obligation(s)")
+
+        # 5. Batch analytics
+        if review_intel.batch_analytics.patterns:
+            console.print(f"\n  [cyan]Batch Analytics ({review_intel.batch_analytics.total_cases_in_window} "
+                          f"cases in window):[/cyan]")
+            for p in review_intel.batch_analytics.patterns:
+                console.print(f"    - {p.description}")
+        console.print()
+
+    def _save_review_intelligence(self, client_id: str, review_intel: ReviewIntelligence):
+        """Save review intelligence to JSON file."""
+        synth_path = self.output_dir / client_id / "03_synthesis"
+        synth_path.mkdir(parents=True, exist_ok=True)
+        (synth_path / "review_intelligence.json").write_text(
+            json.dumps(review_intel.model_dump(), indent=2, default=str),
+            encoding="utf-8"
         )
 
     # =========================================================================

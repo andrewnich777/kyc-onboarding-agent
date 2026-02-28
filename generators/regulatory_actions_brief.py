@@ -12,6 +12,7 @@ def generate_regulatory_actions_brief(
     synthesis=None,
     plan=None,
     investigation=None,
+    review_intelligence=None,
 ) -> str:
     """Generate a regulatory actions brief in Markdown."""
     lines = []
@@ -108,6 +109,21 @@ def generate_regulatory_actions_brief(
             for measure in edd["measures"]:
                 lines.append(f"- {measure}")
             lines.append("")
+
+    # =========================================================================
+    # 3.5 Per-Finding Regulatory Obligations (from Review Intelligence)
+    # =========================================================================
+    if review_intelligence and review_intelligence.regulatory_mappings:
+        lines.append("## Per-Finding Regulatory Obligations")
+        lines.append("")
+        lines.append("| Finding | Source | Regulation | Obligation | Filing | Timeline |")
+        lines.append("|---------|--------|-----------|------------|--------|----------|")
+        for fm in review_intelligence.regulatory_mappings:
+            for tag in fm.regulatory_tags:
+                filing = "Yes" if tag.filing_required else "No"
+                lines.append(f"| {fm.claim[:35]} | {fm.source_name} | {tag.regulation} | "
+                             f"{tag.obligation[:35]} | {filing} | {tag.timeline} |")
+        lines.append("")
 
     # =========================================================================
     # 4. Compliance Action Items

@@ -33,6 +33,7 @@ from agents import (
     JurisdictionRiskAgent, KYCSynthesisAgent,
 )
 from utilities.investigation_planner import build_investigation_plan
+from utilities.review_intelligence import compute_review_intelligence, record_case_signature
 from pipeline_checkpoint import CheckpointMixin
 from pipeline_investigation import InvestigationMixin
 from pipeline_synthesis import SynthesisMixin
@@ -136,10 +137,32 @@ class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMi
             synth_data = self.checkpoint.get("synthesis")
             synthesis = KYCSynthesisOutput(**synth_data) if synth_data else None
 
-        # Save Stage 3 outputs
-        self._save_stage3_outputs(client_id, synthesis, plan)
+        # Compute Review Intelligence (deterministic pass between Synthesis and Review)
+        review_intel = compute_review_intelligence(
+            evidence_store=self.evidence_store,
+            synthesis=synthesis,
+            plan=plan,
+            investigation=investigation,
+            analytics_dir=self.output_dir / "_analytics",
+        )
+        self._save_review_intelligence(client_id, review_intel)
+        self.checkpoint["review_intelligence"] = review_intel.model_dump() if review_intel else None
+        self._save_checkpoint(client_id, self.checkpoint)
+        record_case_signature(
+            client_id=client_id,
+            plan=plan,
+            synthesis=synthesis,
+            investigation=investigation,
+            confidence_grade=review_intel.confidence.overall_confidence_grade,
+            contradictions_count=len(review_intel.contradictions),
+            analytics_dir=self.output_dir / "_analytics",
+        )
 
-        # Display decision points requiring officer review
+        # Save Stage 3 outputs (with review intelligence for proto-briefs)
+        self._save_stage3_outputs(client_id, synthesis, plan, review_intelligence=review_intel)
+
+        # Display review intelligence, THEN decision points
+        self._display_review_intelligence(review_intel)
         self._display_decision_points(synthesis)
 
         # Stage 4: Pause for Review
@@ -162,6 +185,7 @@ class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMi
             intake_classification=plan,
             investigation_results=investigation,
             synthesis=synthesis,
+            review_intelligence=review_intel,
             review_session=review_session,
             final_decision=synthesis.recommended_decision if synthesis else None,
             generated_at=datetime.now(),
@@ -233,8 +257,28 @@ class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMi
                 final_decision = OnboardingDecision.DECLINE
                 self.log(f"  [bold red]Deterministic override: DECLINE ({reasoning})[/bold red]")
 
+        # Load review intelligence (try checkpoint first, then JSON file)
+        review_intel = None
+        ri_checkpoint = checkpoint.get("review_intelligence")
+        if ri_checkpoint:
+            try:
+                from models import ReviewIntelligence
+                review_intel = ReviewIntelligence(**ri_checkpoint)
+            except Exception as e:
+                logger.warning(f"Could not load review intelligence from checkpoint: {e}")
+        if review_intel is None:
+            ri_path = results_path / "03_synthesis" / "review_intelligence.json"
+            if ri_path.exists():
+                try:
+                    from models import ReviewIntelligence
+                    ri_data = json.loads(ri_path.read_text(encoding="utf-8"))
+                    review_intel = ReviewIntelligence(**ri_data)
+                except Exception as e:
+                    logger.warning(f"Could not load review intelligence from file: {e}")
+
         # Generate final reports
-        await self._run_final_reports(client_id, synthesis, plan, review_session, investigation)
+        await self._run_final_reports(client_id, synthesis, plan, review_session, investigation,
+                                      review_intelligence=review_intel)
 
         # Save finalized review session
         if review_session:
@@ -248,6 +292,7 @@ class KYCPipeline(CheckpointMixin, InvestigationMixin, SynthesisMixin, ReportsMi
             intake_classification=plan or InvestigationPlan(client_type=ClientType.INDIVIDUAL, client_id=client_id),
             investigation_results=investigation,
             synthesis=synthesis,
+            review_intelligence=review_intel,
             review_session=review_session,
             final_decision=final_decision,
             generated_at=datetime.now(),

@@ -402,6 +402,108 @@ class KYCSynthesisOutput(BaseModel):
 
 
 # =============================================================================
+# Stage 3.5: Review Intelligence (deterministic, between Synthesis and Review)
+# =============================================================================
+
+class SeverityLevel(str, Enum):
+    """Severity levels for review intelligence findings."""
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    ADVISORY = "ADVISORY"
+
+
+class CriticalDiscussionPoint(BaseModel):
+    """A finding that demands the compliance officer's attention."""
+    point_id: str
+    title: str
+    severity: SeverityLevel
+    reason: str = Field(description="Why this requires discussion")
+    evidence_ids: list[str] = Field(default_factory=list)
+    source_agents: list[str] = Field(default_factory=list)
+    recommended_action: str = ""
+
+
+class Contradiction(BaseModel):
+    """A contradiction detected between two findings or agents."""
+    contradiction_id: str
+    finding_a: str
+    finding_b: str
+    agent_a: str
+    agent_b: str
+    evidence_ids: list[str] = Field(default_factory=list)
+    severity: SeverityLevel = SeverityLevel.MEDIUM
+    resolution_guidance: str = ""
+
+
+class ConfidenceDegradationAlert(BaseModel):
+    """Assessment of overall evidence quality."""
+    overall_confidence_grade: str = Field(default="F", description="Letter grade A-F")
+    verified_pct: float = 0.0
+    sourced_pct: float = 0.0
+    inferred_pct: float = 0.0
+    unknown_pct: float = 0.0
+    degraded: bool = False
+    follow_up_actions: list[str] = Field(default_factory=list)
+
+
+class RegulatoryTag(BaseModel):
+    """A regulatory obligation mapped to a specific finding."""
+    regulation: str
+    obligation: str
+    trigger_description: str = ""
+    evidence_id: str = ""
+    filing_required: bool = False
+    timeline: str = ""
+
+
+class FindingWithRegulations(BaseModel):
+    """An evidence finding annotated with its regulatory implications."""
+    evidence_id: str
+    claim: str
+    source_name: str
+    regulatory_tags: list[RegulatoryTag] = Field(default_factory=list)
+
+
+class BatchCaseSignature(BaseModel):
+    """Compact fingerprint for cross-case analytics."""
+    client_id: str
+    timestamp: datetime = Field(default_factory=datetime.now)
+    risk_level: str = ""
+    risk_score: int = 0
+    jurisdictions: list[str] = Field(default_factory=list)
+    industries: list[str] = Field(default_factory=list)
+    client_type: str = ""
+    regulations_triggered: list[str] = Field(default_factory=list)
+    confidence_grade: str = ""
+    contradictions_count: int = 0
+
+
+class BatchPattern(BaseModel):
+    """A pattern detected across multiple cases."""
+    pattern_type: str = Field(description="jurisdiction_cluster, industry_cluster, regulation_surge, risk_trend")
+    description: str
+    count: int = 0
+    case_ids: list[str] = Field(default_factory=list)
+    significance: str = ""
+
+
+class BatchAnalytics(BaseModel):
+    """Cross-case pattern analytics."""
+    total_cases_in_window: int = 0
+    patterns: list[BatchPattern] = Field(default_factory=list)
+
+
+class ReviewIntelligence(BaseModel):
+    """Composite model holding all five review intelligence facets."""
+    discussion_points: list[CriticalDiscussionPoint] = Field(default_factory=list)
+    contradictions: list[Contradiction] = Field(default_factory=list)
+    confidence: ConfidenceDegradationAlert = Field(default_factory=ConfidenceDegradationAlert)
+    regulatory_mappings: list[FindingWithRegulations] = Field(default_factory=list)
+    batch_analytics: BatchAnalytics = Field(default_factory=BatchAnalytics)
+
+
+# =============================================================================
 # Stage 4: Review Session
 # =============================================================================
 
@@ -439,6 +541,7 @@ class KYCOutput(BaseModel):
     intake_classification: InvestigationPlan
     investigation_results: InvestigationResults = Field(default_factory=InvestigationResults)
     synthesis: Optional[KYCSynthesisOutput] = None
+    review_intelligence: Optional[ReviewIntelligence] = None
     review_session: Optional[ReviewSession] = None
     final_decision: Optional[OnboardingDecision] = None
     compliance_brief: str = ""

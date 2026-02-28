@@ -13,6 +13,7 @@ def generate_onboarding_summary(
     synthesis=None,
     plan=None,
     investigation=None,
+    review_intelligence=None,
 ) -> str:
     """Generate an onboarding decision brief."""
     lines = []
@@ -33,6 +34,41 @@ def generate_onboarding_summary(
     lines.append(f"# Onboarding Decision: {decision_emoji.get(decision, decision)}")
     lines.append(f"**Client:** {client_id} | **Date:** {now}")
     lines.append("")
+
+    # 1.5 Review Intelligence Highlights
+    if review_intelligence:
+        lines.append("## Review Intelligence Highlights")
+        lines.append("")
+
+        # Contradiction count alert
+        if review_intelligence.contradictions:
+            lines.append(f"- **{len(review_intelligence.contradictions)} contradiction(s) detected** "
+                         f"— review before finalizing decision")
+
+        # Confidence grade alert if degraded
+        conf = review_intelligence.confidence
+        if conf.degraded:
+            lines.append(f"- **Evidence quality: Grade {conf.overall_confidence_grade}** "
+                         f"(V:{conf.verified_pct:.0f}% S:{conf.sourced_pct:.0f}% "
+                         f"I:{conf.inferred_pct:.0f}% U:{conf.unknown_pct:.0f}%) — DEGRADED")
+
+        # Top 3 critical discussion points
+        top_points = review_intelligence.discussion_points[:3]
+        if top_points:
+            lines.append("")
+            lines.append("**Priority discussion points:**")
+            for dp in top_points:
+                lines.append(f"- [{dp.severity.value}] {dp.title}")
+
+        # Filing obligation count
+        filing_count = sum(
+            1 for fm in review_intelligence.regulatory_mappings
+            for tag in fm.regulatory_tags if tag.filing_required
+        )
+        if filing_count > 0:
+            lines.append(f"- **{filing_count} regulatory filing obligation(s)** identified")
+
+        lines.append("")
 
     # 2. Risk level badge
     if plan and plan.preliminary_risk:

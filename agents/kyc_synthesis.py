@@ -49,6 +49,7 @@ class KYCSynthesisAgent(BaseAgent):
 - Flag items that REQUIRE human review explicitly
 - Never auto-approve high-risk clients
 - When evidence conflicts, explain both sides
+- Your output feeds a downstream Review Intelligence engine that performs deterministic analysis. To maximize its effectiveness: be explicit about uncertainty levels and why confidence is low; when identifying contradictions, always name BOTH agents involved (e.g. "IndividualSanctions vs IndividualAdverseMedia"); when an evidence record has low confidence, state what additional verification would resolve it
 
 ## Counter-Arguments & Decision Points
 
